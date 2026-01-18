@@ -9,26 +9,29 @@
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx --fix --ignore-path .gitignore"
   },
   "dependencies": {
-    "vue": "^3.4.21",
-    "vue-router": "^4.3.0",
-    "pinia": "^2.1.7",
+    "@fortawesome/fontawesome-free": "^6.5.1",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/xterm": "^6.0.0",
     "axios": "^1.6.5",
     "konva": "^9.2.3",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.21",
     "vue-konva": "^3.0.2",
-    "@fortawesome/fontawesome-free": "^6.5.1"
+    "vue-router": "^4.3.0",
+    "xterm": "^5.3.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.0.4",
     "@vue/eslint-config-typescript": "^12.0.0",
     "@vue/tsconfig": "^0.5.1",
+    "autoprefixer": "^10.4.17",
+    "eslint": "^8.56.0",
+    "eslint-plugin-vue": "^9.20.0",
+    "postcss": "^8.4.33",
+    "tailwindcss": "^3.4.1",
     "typescript": "~5.3.3",
     "vite": "^5.1.0",
-    "vue-tsc": "^1.8.27",
-    "tailwindcss": "^3.4.1",
-    "autoprefixer": "^10.4.17",
-    "postcss": "^8.4.33",
-    "eslint": "^8.56.0",
-    "eslint-plugin-vue": "^9.20.0"
+    "vue-tsc": "^1.8.27"
   }
 }
-

@@ -144,7 +144,16 @@ export interface PauseResumeRequest {
 
 // ========== WebSocket 消息 ==========
 export interface WSMessage {
-  type: 'node_update' | 'execution_result' | 'system_status' | 'clue_added' | 'error'
+  type:
+    | 'node_update'
+    | 'execution_result'
+    | 'system_status'
+    | 'clue_added'
+    | 'error'
+    | 'terminal_output'
+    | 'system_command_output'
+    | 'terminal_connected'
+    | 'terminal_disconnected'
   data: any
   timestamp: string
 }

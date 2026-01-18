@@ -49,7 +49,7 @@
     </div>
 
     <!-- 底部：终端 -->
-    <TerminalPanel :lines="terminalLines" :show-cursor="true" />
+    <TerminalPanel ref="terminalRef" />
   </div>
 </template>
 
@@ -76,7 +76,7 @@ const executionStore = useExecutionStore()
 const dialogStore = useDialogStore()
 
 const showStartOverlay = computed(() => systemStore.isIdle)
-const terminalLines = ref<Array<{ type: 'command' | 'output' | 'error'; content: string }>>([])
+const terminalRef = ref<InstanceType<typeof TerminalPanel>>()
 
 const missionStatusText = computed(() => {
   if (systemStore.isRunning) return 'IN PROGRESS'
@@ -91,22 +91,37 @@ async function handleStartFlow(targetIP: string) {
   try {
     // 1. 添加系统消息
     dialogStore.addSystemMessage('🚀 正在启动自动化渗透测试流程...')
-    addTerminalLine('output', `Starting automated penetration test for target: ${targetIP}`)
+    terminalRef.value?.writeCommand(`Starting automated penetration test for target: ${targetIP}`)
 
     // 2. 初始化 WebSocket 连接（在启动前连接，以便接收初始数据）
+    // 注意：如果后端未运行，WebSocket 连接会失败，但不影响界面演示
     if (!wsManager.isConnected) {
-      addTerminalLine('output', 'Connecting to backend WebSocket...')
-      await wsManager.connect()
-      addTerminalLine('output', 'WebSocket connected')
+      terminalRef.value?.writeOutput('Connecting to backend WebSocket...\r\n')
+      try {
+        await wsManager.connect()
+        terminalRef.value?.writeOutput('\x1b[32mWebSocket connected\r\n\x1b[0m')
+      } catch (error: any) {
+        terminalRef.value?.writeOutput('\x1b[33mWarning: WebSocket connection failed (backend may not be running)\r\n\x1b[0m')
+        terminalRef.value?.writeOutput('Continuing in demo mode...\r\n')
+        // WebSocket 连接失败不影响界面演示，继续执行
+      }
     }
 
     // 3. 初始化 WebSocket 监听
     initWebSocketListeners()
 
     // 4. 启动系统（调用后端 API）
-    addTerminalLine('output', 'Sending start request to backend...')
-    const systemState = await systemStore.start(targetIP)
-    addTerminalLine('output', 'Backend response received')
+    terminalRef.value?.writeOutput('Sending start request to backend...\r\n')
+    try {
+      const systemState = await systemStore.start(targetIP)
+      terminalRef.value?.writeOutput('\x1b[32mBackend response received\r\n\x1b[0m')
+    } catch (error: any) {
+      terminalRef.value?.writeOutput('\x1b[33mWarning: Backend API call failed (backend may not be running)\r\n\x1b[0m')
+      terminalRef.value?.writeOutput('Running in demo mode with mock data...\r\n')
+      // API 调用失败时，设置系统状态为运行中（演示模式）
+      systemStore.setStatus('running')
+      systemStore.setTargetIP(targetIP)
+    }
 
     // 5. 创建初始 target 节点（如果后端没有返回）
     await createInitialNode(targetIP)
@@ -118,12 +133,12 @@ async function handleStartFlow(targetIP: string) {
     dialogStore.addSystemMessage('🚀 自动化渗透测试流程已启动')
     dialogStore.addSystemMessage(`🎯 目标IP: ${targetIP}`)
     dialogStore.addSystemMessage('系统将自动执行低风险操作，遇到高风险操作时将暂停等待审核')
-    addTerminalLine('output', 'Flow started successfully')
+    terminalRef.value?.writeOutput('Flow started successfully\r\n')
   } catch (error: any) {
     console.error('启动流程失败:', error)
     dialogStore.addErrorMessage(`启动失败: ${error.message || '未知错误'}`)
     systemStore.setError(error.message || '启动流程失败')
-    addTerminalLine('error', `Failed to start flow: ${error.message || 'Unknown error'}`)
+    terminalRef.value?.writeOutput(`\x1b[31mFailed to start flow: ${error.message || 'Unknown error'}\x1b[0m\r\n`)
   }
 }
 
@@ -160,7 +175,7 @@ async function createInitialNode(targetIP: string) {
   }
 
   nodeStore.addNode(initialNode)
-  addTerminalLine('output', `Initial target node created at (${initialNode.x}, ${initialNode.y})`)
+  terminalRef.value?.writeOutput(`Initial target node created at (${initialNode.x}, ${initialNode.y})\r\n`)
 }
 
 // 初始化 WebSocket 监听
@@ -177,7 +192,7 @@ function initWebSocketListeners() {
     } else {
       nodeStore.updateNode(data)
       // 如果节点状态变化，添加终端日志
-      addTerminalLine('output', `Node ${data.title} status: ${data.status}`)
+      terminalRef.value?.writeOutput(`Node ${data.title} status: ${data.status}\r\n`)
     }
   })
 
@@ -188,10 +203,10 @@ function initWebSocketListeners() {
     if (node) {
       if (data.result.success) {
         dialogStore.addSuccessMessage(`节点 ${node.title} 执行成功`)
-        addTerminalLine('output', `✓ ${node.title}: ${data.result.message}`)
+        terminalRef.value?.writeOutput(`\x1b[32m✓ ${node.title}: ${data.result.message}\x1b[0m\r\n`)
       } else {
         dialogStore.addErrorMessage(`节点 ${node.title} 执行失败: ${data.result.message}`)
-        addTerminalLine('error', `✗ ${node.title}: ${data.result.message}`)
+        terminalRef.value?.writeOutput(`\x1b[31m✗ ${node.title}: ${data.result.message}\x1b[0m\r\n`)
       }
     }
   })
@@ -199,15 +214,15 @@ function initWebSocketListeners() {
   // 线索添加
   wsManager.on('clue_added', (data: Clue) => {
     clueStore.addClue(data)
-    dialogStore.addSystemMessage(`发现新线索: ${data.title}`)
-    addTerminalLine('output', `New clue discovered: ${data.title}`)
+      dialogStore.addSystemMessage(`发现新线索: ${data.title}`)
+      terminalRef.value?.writeOutput(`New clue discovered: ${data.title}\r\n`)
   })
 
   // 错误处理
   wsManager.on('error', (data: { message: string }) => {
     dialogStore.addErrorMessage(data.message)
     systemStore.setError(data.message)
-    addTerminalLine('error', `Error: ${data.message}`)
+    terminalRef.value?.writeOutput(`\x1b[31mError: ${data.message}\x1b[0m\r\n`)
   })
 }
 
@@ -233,27 +248,17 @@ async function handlePauseResume() {
     if (systemStore.isPaused) {
       await systemStore.resume()
       dialogStore.addSystemMessage('流程已继续')
-      addTerminalLine('output', 'Flow resumed')
+      terminalRef.value?.writeOutput('Flow resumed\r\n')
     } else {
       await systemStore.pause()
       dialogStore.addSystemMessage('流程已暂停')
-      addTerminalLine('output', 'Flow paused')
+      terminalRef.value?.writeOutput('Flow paused\r\n')
     }
   } catch (error: any) {
     dialogStore.addErrorMessage(`操作失败: ${error.message}`)
   }
 }
 
-// 添加终端日志
-function addTerminalLine(
-  type: 'command' | 'output' | 'error',
-  content: string
-) {
-  terminalLines.value.push({
-    type,
-    content,
-  })
-}
 
 onMounted(() => {
   // 初始化 stores 的 WebSocket 监听

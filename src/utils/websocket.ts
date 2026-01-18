@@ -25,11 +25,31 @@ export class WebSocketManager {
     return new Promise((resolve, reject) => {
       try {
         this.ws = new WebSocket(this.url)
+        let resolved = false
+        let connectionTimeout: ReturnType<typeof setTimeout> | null = null
+
+        // 设置连接超时（5秒）
+        connectionTimeout = setTimeout(() => {
+          if (!resolved) {
+            resolved = true
+            if (this.ws) {
+              this.ws.close()
+            }
+            reject(new Error('WebSocket connection timeout'))
+          }
+        }, 5000)
 
         this.ws.onopen = () => {
-          console.log('WebSocket connected')
-          this.reconnectAttempts = 0
-          resolve()
+          if (connectionTimeout) {
+            clearTimeout(connectionTimeout)
+            connectionTimeout = null
+          }
+          if (!resolved) {
+            resolved = true
+            console.log('WebSocket connected')
+            this.reconnectAttempts = 0
+            resolve()
+          }
         }
 
         this.ws.onmessage = (event) => {
@@ -42,12 +62,27 @@ export class WebSocketManager {
         }
 
         this.ws.onerror = (error) => {
-          console.error('WebSocket error:', error)
-          reject(error)
+          // 不输出错误到控制台（避免噪音）
+          // 错误会在 onclose 中处理
         }
 
-        this.ws.onclose = () => {
-          console.log('WebSocket closed')
+        this.ws.onclose = (event) => {
+          if (connectionTimeout) {
+            clearTimeout(connectionTimeout)
+            connectionTimeout = null
+          }
+          
+          // 如果还未 resolve，说明连接失败了
+          if (!resolved && !this.isManualClose) {
+            resolved = true
+            reject(new Error('WebSocket connection failed'))
+            return
+          }
+
+          if (import.meta.env.DEV && this.isManualClose) {
+            console.log('WebSocket closed')
+          }
+
           if (!this.isManualClose) {
             this.reconnect()
           }
@@ -76,7 +111,11 @@ export class WebSocketManager {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message))
     } else {
-      console.warn('WebSocket is not connected')
+      // 静默失败，不输出错误（避免控制台噪音）
+      // 仅在开发模式下输出警告
+      if (import.meta.env.DEV) {
+        console.debug('WebSocket is not connected, message not sent:', message)
+      }
     }
   }
 
