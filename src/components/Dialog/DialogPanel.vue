@@ -104,12 +104,18 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
-import { useDialogStore, useSystemStore } from '@/stores'
+import { useDialogStore, useSystemStore, useNodeStore, useExecutionStore } from '@/stores'
+import { executeAction } from '@/api'
+import { generateNodeFromNextNode, generateConnection } from '@/utils/nodeGenerator'
+import { generateId } from '@/utils'
+import type { Node, NextNode, Connection, ExecutionResult } from '@/types'
 import DialogMessage from './DialogMessage.vue'
 import SelectionMenu from './SelectionMenu.vue'
 
 const dialogStore = useDialogStore()
 const systemStore = useSystemStore()
+const nodeStore = useNodeStore()
+const executionStore = useExecutionStore()
 
 const messagesContainerRef = ref<HTMLElement>()
 const userInput = ref('')
@@ -179,19 +185,208 @@ function removeSelectedItem(id: string) {
   }
 }
 
-function handleActionConfirm(messageId: string, actionPlanId: string) {
-  // 处理操作确认
-  console.log('确认操作', messageId, actionPlanId)
+// 处理操作确认
+async function handleActionConfirm(messageId: string, actionPlanId: string) {
+  const message = dialogStore.messages.find((m) => m.id === messageId)
+  if (!message || !message.actionData) {
+    return
+  }
+
+  const actionData = message.actionData
+  const nodeType = actionData.nodeType || actionData.plan.id.split('-')[0]
+
+  // 查找对应的节点
+  const node = nodeStore.nodes.find((n) => n.type === nodeType)
+  if (!node) {
+    dialogStore.addErrorMessage('找不到对应的节点')
+    return
+  }
+
+  try {
+    // 更新节点状态为 executing
+    await nodeStore.updateNodeStatusById(node.id, 'executing')
+    nodeStore.updateNode({ ...node, status: 'executing' })
+    systemStore.setCurrentExecutionNode(node.id)
+
+    // 更新对话框消息状态
+    dialogStore.updateActionMessageStatus(messageId, 'executing')
+
+    // 显示执行信息
+    dialogStore.addSystemMessage(`开始执行: ${node.title}`)
+
+    // 调用后端 API 执行操作
+    const result = await executeAction({
+      nodeType: node.type,
+      actionPlanId,
+    })
+
+    // 处理执行结果（通过 WebSocket 或直接处理）
+    // 这里的结果会通过 WebSocket 的 execution_result 消息处理
+    // 如果 WebSocket 不可用，直接更新状态
+    if (result) {
+      executionStore.completeExecution(node.id, result)
+      const newStatus = result.success ? 'success' : 'failed'
+      await nodeStore.updateNodeStatusById(node.id, newStatus)
+      dialogStore.updateActionMessageStatus(messageId, newStatus)
+      dialogStore.updateActionMessageResult(messageId, result)
+
+      if (result.success) {
+        dialogStore.addSuccessMessage(`节点 ${node.title} 执行成功`)
+        // 生成后续节点
+        await generateNextNodes(node.id, actionPlanId, message.actionData.plan)
+      } else {
+        dialogStore.addErrorMessage(`节点 ${node.title} 执行失败: ${result.message}`)
+      }
+    }
+  } catch (error: any) {
+    console.error('执行操作失败:', error)
+    await nodeStore.updateNodeStatusById(node.id, 'failed')
+    dialogStore.updateActionMessageStatus(messageId, 'failed')
+    dialogStore.updateActionMessageResult(messageId, {
+      success: false,
+      message: error.message || '执行失败',
+    })
+    dialogStore.addErrorMessage(`执行失败: ${error.message || '未知错误'}`)
+  }
 }
 
+// 处理操作取消
 function handleActionCancel(messageId: string) {
-  // 处理操作取消
-  console.log('取消操作', messageId)
+  const message = dialogStore.messages.find((m) => m.id === messageId)
+  if (message && message.actionData) {
+    dialogStore.updateActionMessageStatus(messageId, 'failed')
+    dialogStore.addSystemMessage('操作已取消')
+  }
 }
 
-function handleActionModify(messageId: string, modifiedCmd: string) {
-  // 处理命令修改
-  console.log('修改命令', messageId, modifiedCmd)
+// 处理命令修改
+async function handleActionModify(messageId: string, modifiedCmd: string) {
+  const message = dialogStore.messages.find((m) => m.id === messageId)
+  if (!message || !message.actionData) {
+    return
+  }
+
+  const actionPlanId = message.actionData.plan.id
+  const nodeType = message.actionData.nodeType || message.actionData.plan.id.split('-')[0]
+
+  // 查找对应的节点
+  const node = nodeStore.nodes.find((n) => n.type === nodeType)
+  if (!node) {
+    dialogStore.addErrorMessage('找不到对应的节点')
+    return
+  }
+
+  // 更新操作计划中的命令
+  if (message.actionData.plan) {
+    message.actionData.plan.cmd = modifiedCmd
+    message.actionData.plan.isCustom = true
+  }
+
+  dialogStore.addSystemMessage('命令已修改，准备执行...')
+
+  try {
+    // 更新节点状态为 executing
+    await nodeStore.updateNodeStatusById(node.id, 'executing')
+    nodeStore.updateNode({ ...node, status: 'executing' })
+    systemStore.setCurrentExecutionNode(node.id)
+
+    // 更新对话框消息状态
+    dialogStore.updateActionMessageStatus(messageId, 'executing')
+
+    // 调用后端 API 执行修改后的命令
+    const result = await executeAction({
+      nodeType: node.type,
+      actionPlanId,
+      modifiedCmd,
+    })
+
+    // 处理执行结果
+    if (result) {
+      executionStore.completeExecution(node.id, result)
+      const newStatus = result.success ? 'success' : 'failed'
+      await nodeStore.updateNodeStatusById(node.id, newStatus)
+      dialogStore.updateActionMessageStatus(messageId, newStatus)
+      dialogStore.updateActionMessageResult(messageId, result)
+
+      if (result.success) {
+        dialogStore.addSuccessMessage(`节点 ${node.title} 执行成功`)
+        // 生成后续节点
+        await generateNextNodes(node.id, actionPlanId, message.actionData.plan)
+      } else {
+        dialogStore.addErrorMessage(`节点 ${node.title} 执行失败: ${result.message}`)
+      }
+    }
+  } catch (error: any) {
+    console.error('执行修改后的命令失败:', error)
+    await nodeStore.updateNodeStatusById(node.id, 'failed')
+    dialogStore.updateActionMessageStatus(messageId, 'failed')
+    dialogStore.updateActionMessageResult(messageId, {
+      success: false,
+      message: error.message || '执行失败',
+    })
+    dialogStore.addErrorMessage(`执行失败: ${error.message || '未知错误'}`)
+  }
+}
+
+/**
+ * 生成后续节点
+ */
+async function generateNextNodes(
+  nodeId: string,
+  actionPlanId: string,
+  actionPlan: any
+) {
+  const node = nodeStore.getNode(nodeId)
+  if (!node || !actionPlan || !actionPlan.nextNodes || actionPlan.nextNodes.length === 0) {
+    return
+  }
+
+  // 生成新节点
+  const newNodes: Node[] = []
+  const newConnections: Connection[] = []
+
+  actionPlan.nextNodes.forEach((nextNode: NextNode, index: number) => {
+    // 检查节点是否已存在（避免重复创建）
+    const existingNode = nodeStore.nodes.find((n) => n.type === nextNode.type)
+    if (existingNode) {
+      // 如果节点已存在，只创建连线
+      const connection = generateConnection(nodeId, existingNode.id)
+      newConnections.push(connection)
+      return
+    }
+
+    // 生成新节点
+    const newNode = generateNodeFromNextNode(
+      nextNode,
+      node,
+      index,
+      actionPlan.nextNodes.length
+    )
+    newNodes.push(newNode)
+
+    // 生成连线
+    const connection = generateConnection(nodeId, newNode.id)
+    newConnections.push(connection)
+  })
+
+  // 添加到画布
+  newNodes.forEach((newNode) => {
+    nodeStore.addNode(newNode)
+    dialogStore.addSystemMessage(`发现新节点: ${newNode.title}`)
+
+    // 添加到执行队列
+    executionStore.addToQueue({
+      nodeType: newNode.type,
+      nodeId: newNode.id,
+      priority: actionPlan.priority || 0,
+      timestamp: new Date().toISOString(),
+    })
+  })
+
+  // 添加连线
+  newConnections.forEach((conn) => {
+    nodeStore.addConnection(conn)
+  })
 }
 </script>
 

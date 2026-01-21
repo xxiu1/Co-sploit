@@ -28,16 +28,14 @@ export class WebSocketManager {
         let resolved = false
         let connectionTimeout: ReturnType<typeof setTimeout> | null = null
 
-        // 设置连接超时（5秒）
+        // 设置连接超时（3秒），失败时进入重连但不抛出异常
         connectionTimeout = setTimeout(() => {
           if (!resolved) {
             resolved = true
-            if (this.ws) {
-              this.ws.close()
-            }
+            this.safeClose()
             reject(new Error('WebSocket connection timeout'))
           }
-        }, 5000)
+        }, 3000)
 
         this.ws.onopen = () => {
           if (connectionTimeout) {
@@ -46,7 +44,6 @@ export class WebSocketManager {
           }
           if (!resolved) {
             resolved = true
-            console.log('WebSocket connected')
             this.reconnectAttempts = 0
             resolve()
           }
@@ -57,30 +54,25 @@ export class WebSocketManager {
             const message: WSMessage = JSON.parse(event.data)
             this.handleMessage(message)
           } catch (error) {
-            console.error('Failed to parse WebSocket message:', error)
+            if (import.meta.env.DEV) {
+              console.error('Failed to parse WebSocket message:', error)
+            }
           }
         }
 
-        this.ws.onerror = (error) => {
-          // 不输出错误到控制台（避免噪音）
-          // 错误会在 onclose 中处理
+        this.ws.onerror = () => {
+          // 静默处理，错误将在 onclose 中处理
         }
 
-        this.ws.onclose = (event) => {
+        this.ws.onclose = () => {
           if (connectionTimeout) {
             clearTimeout(connectionTimeout)
             connectionTimeout = null
           }
-          
-          // 如果还未 resolve，说明连接失败了
-          if (!resolved && !this.isManualClose) {
+
+          if (!resolved) {
             resolved = true
             reject(new Error('WebSocket connection failed'))
-            return
-          }
-
-          if (import.meta.env.DEV && this.isManualClose) {
-            console.log('WebSocket closed')
           }
 
           if (!this.isManualClose) {
@@ -91,6 +83,19 @@ export class WebSocketManager {
         reject(error)
       }
     })
+  }
+
+  /**
+   * 安全关闭连接
+   */
+  private safeClose() {
+    try {
+      if (this.ws) {
+        this.ws.close()
+      }
+    } catch (e) {
+      // ignore
+    }
   }
 
   /**

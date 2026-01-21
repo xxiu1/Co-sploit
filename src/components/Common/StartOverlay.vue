@@ -5,7 +5,7 @@
   >
     <div class="text-center w-full max-w-md px-6">
       <div class="text-4xl font-bold text-purple-500 mb-4">CO-SPLOIT</div>
-      <div class="text-gray-400 mb-6">混合主动性协同渗透测试系统</div>
+      <div class="text-gray-400 mb-6">交互式渗透测试系统</div>
 
       <!-- 目标IP输入 -->
       <div class="mb-6 text-left">
