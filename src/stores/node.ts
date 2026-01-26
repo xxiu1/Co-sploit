@@ -4,8 +4,10 @@
  */
 
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import type { Node, NodeStatus, Connection } from '@/types'
+
+// 导入 Connection 类型（如果还没有）
 import { getNodes, getNodeById, updateNodeStatus } from '@/api'
 import { wsManager } from '@/utils/websocket'
 
@@ -65,7 +67,10 @@ export const useNodeStore = defineStore('node', () => {
   function initWebSocket() {
     wsManager.on('node_update', (data: Node | Node[]) => {
       if (Array.isArray(data)) {
-        setNodes(data)
+        // 不要直接替换所有节点，而是增量更新，保留已有节点
+        for (const node of data) {
+          updateNode(node)
+        }
       } else {
         updateNode(data)
       }
@@ -204,14 +209,246 @@ export const useNodeStore = defineStore('node', () => {
   }
 
   /**
-   * 从服务器加载所有节点
+   * 从服务器加载所有节点和连接（支持增量更新）
    */
+  /**
+   * 根据节点的 parent_id 生成连接（前后端分离）
+   * 如果节点没有父节点，且存在初始节点（target节点），则连接到初始节点
+   */
+  function generateConnectionsFromNodes(nodeList: Node[]): Connection[] {
+    const conns: Connection[] = []
+    const nodeMap = new Map(nodeList.map(n => [n.id, n]))
+
+    // 查找初始节点（target节点）
+    const initialNode = nodeList.find(n => n.type === 'target' || n.id.startsWith('node-target-'))
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:generateConnectionsFromNodes', message: '查找初始节点', data: { initialNodeId: initialNode?.id, totalNodes: nodeList.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'I' }) }).catch(() => { });
+    // #endregion
+
+    // 记录哪些节点已经有父节点连接
+    const nodesWithParent = new Set<string>()
+
+    for (const node of nodeList) {
+      // 跳过初始节点本身
+      if (node.type === 'target' || node.id.startsWith('node-target-')) {
+        continue
+      }
+
+      const parentId = node.metadata?.parent_id
+      if (parentId !== null && parentId !== undefined) {
+        // 任务节点的 parent_id 是数字，需要转换为 node ID
+        const parentNodeId = typeof parentId === 'number' ? `task-${parentId}` : parentId
+
+        // 确保父节点存在
+        if (nodeMap.has(parentNodeId)) {
+          conns.push({
+            id: `conn-${parentNodeId}-${node.id}`,
+            fromNodeId: parentNodeId,
+            toNodeId: node.id,
+          })
+          nodesWithParent.add(node.id)
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:generateConnectionsFromNodes', message: '生成连接（有父节点）', data: { from: parentNodeId, to: node.id, parentId }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'A' }) }).catch(() => { });
+          // #endregion
+        } else {
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:generateConnectionsFromNodes', message: '父节点不存在', data: { parentNodeId, nodeId: node.id, parentId }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'B' }) }).catch(() => { });
+          // #endregion
+        }
+      }
+
+      // 线索节点的 parent_clue_id（如果有）
+      const parentClueId = node.metadata?.parent_clue_id
+      if (parentClueId !== null && parentClueId !== undefined) {
+        const parentClueNodeId = typeof parentClueId === 'number' ? `clue-${parentClueId}` : parentClueId
+        if (nodeMap.has(parentClueNodeId)) {
+          conns.push({
+            id: `conn-${parentClueNodeId}-${node.id}`,
+            fromNodeId: parentClueNodeId,
+            toNodeId: node.id,
+          })
+          nodesWithParent.add(node.id)
+        }
+      }
+
+      // 如果节点没有父节点，且存在初始节点，则连接到初始节点
+      if (!nodesWithParent.has(node.id) && initialNode) {
+        // 只连接任务节点（不连接线索节点）
+        if (node.type === 'task') {
+          conns.push({
+            id: `conn-${initialNode.id}-${node.id}`,
+            fromNodeId: initialNode.id,
+            toNodeId: node.id,
+          })
+          nodesWithParent.add(node.id)
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:generateConnectionsFromNodes', message: '连接到初始节点（无父节点）', data: { from: initialNode.id, to: node.id, nodeType: node.type }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'J' }) }).catch(() => { });
+          // #endregion
+        }
+      }
+    }
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:generateConnectionsFromNodes', message: '连接生成完成', data: { totalNodes: nodeList.length, connectionsGenerated: conns.length, nodesWithParent: nodesWithParent.size, connections: conns.slice(0, 5).map(c => ({ from: c.fromNodeId, to: c.toNodeId })) }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
+    // #endregion
+
+    return conns
+  }
+
   async function loadNodes(): Promise<void> {
     try {
-      const nodeList = await getNodes()
-      setNodes(nodeList)
+      const result = await getNodes()
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:loadNodes', message: '收到后端数据', data: { hasData: !!result, isArray: Array.isArray(result), hasNodes: result && typeof result === 'object' && 'nodes' in result, nodesCount: result && typeof result === 'object' && 'nodes' in result ? (result.nodes || []).length : 0 }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'D' }) }).catch(() => { });
+      // #endregion
+
+      console.log('[DEBUG] 收到后端节点数据:', {
+        isArray: Array.isArray(result),
+        hasNodes: result && typeof result === 'object' && 'nodes' in result,
+        nodesCount: result && typeof result === 'object' && 'nodes' in result ? (result.nodes || []).length : 0,
+      })
+
+      // 前后端分离：后端只返回 { nodes: Node[] }，连接由前端生成
+      if (result && typeof result === 'object') {
+        let newNodes: Node[] = []
+
+        if (Array.isArray(result)) {
+          // 兼容旧格式（直接返回节点数组）
+          newNodes = result
+        } else if ('data' in result && result.data && typeof result.data === 'object' && 'nodes' in result.data) {
+          // 后端返回格式：{ code, message, data: { nodes } }
+          const dataNodes = (result.data as any).nodes
+          newNodes = Array.isArray(dataNodes) ? dataNodes : []
+        } else if ('nodes' in result) {
+          // 新格式：只包含 nodes
+          const resultNodes = (result as any).nodes
+          newNodes = Array.isArray(resultNodes) ? resultNodes : []
+
+          // 调试信息：打印节点详情
+          if (newNodes.length > 0) {
+            console.log('[DEBUG] 节点详情示例:', {
+              id: newNodes[0].id,
+              title: newNodes[0].title,
+              status: newNodes[0].status,
+              metadata: {
+                history_actions_count: newNodes[0].metadata?.history_actions?.length || 0,
+                action_plans_count: newNodes[0].metadata?.action_plans?.length || 0,
+                state_context_length: newNodes[0].metadata?.state_context?.length || 0,
+              }
+            })
+          }
+        }
+
+        // 增量更新：只更新变化的节点
+        const oldNodeMap = new Map(nodes.value.map(n => [n.id, n]))
+        const newNodeMap = new Map(newNodes.map(n => [n.id, n]))
+
+        // 识别新增和更新的节点
+        const addedNodes: Node[] = []
+        const updatedNodes: Node[] = []
+
+        for (const newNode of newNodes) {
+          // 确保节点有位置属性（如果没有，设置默认值）
+          if (newNode.x === undefined || newNode.x === null) {
+            newNode.x = 0
+          }
+          if (newNode.y === undefined || newNode.y === null) {
+            newNode.y = 0
+          }
+
+          const oldNode = oldNodeMap.get(newNode.id)
+          if (!oldNode) {
+            // 新增节点
+            addedNodes.push(newNode)
+            console.log('[DEBUG] 发现新节点:', newNode.id, newNode.title)
+          } else {
+            // 检查是否有变化（状态、位置、metadata）
+            const hasChanged =
+              oldNode.status !== newNode.status ||
+              oldNode.x !== newNode.x ||
+              oldNode.y !== newNode.y ||
+              JSON.stringify(oldNode.metadata) !== JSON.stringify(newNode.metadata)
+
+            if (hasChanged) {
+              updatedNodes.push(newNode)
+              console.log('[DEBUG] 节点已更新:', newNode.id, {
+                status: `${oldNode.status} -> ${newNode.status}`,
+                position: `(${oldNode.x}, ${oldNode.y}) -> (${newNode.x}, ${newNode.y})`
+              })
+            }
+          }
+        }
+
+        // 不要删除任何节点！保留所有历史节点
+        // 任务完成后节点应该保留在画布上，不要删除
+        const deletedNodeIds: string[] = []
+        // 完全禁用删除逻辑，保留所有节点（包括前端创建的节点和已完成的节点）
+
+        // 应用更新
+        if (addedNodes.length > 0 || updatedNodes.length > 0 || deletedNodeIds.length > 0) {
+          console.log('[DEBUG] 应用节点更新:', {
+            added: addedNodes.length,
+            updated: updatedNodes.length,
+            deleted: deletedNodeIds.length
+          })
+
+          // 更新节点列表
+          const updatedNodeList = [...nodes.value]
+
+          // 添加新节点
+          for (const node of addedNodes) {
+            updatedNodeList.push(node)
+          }
+
+          // 更新已存在的节点
+          for (const node of updatedNodes) {
+            const index = updatedNodeList.findIndex(n => n.id === node.id)
+            if (index >= 0) {
+              updatedNodeList[index] = node
+            }
+          }
+
+          // 删除不存在的节点（但已保护前端创建的节点和已完成的节点）
+          for (const nodeId of deletedNodeIds) {
+            const index = updatedNodeList.findIndex(n => n.id === nodeId)
+            if (index >= 0) {
+              updatedNodeList.splice(index, 1)
+            }
+          }
+
+          nodes.value = updatedNodeList
+        }
+
+        // 前后端分离：根据节点的 parent_id 生成连接
+        const generatedConnections = generateConnectionsFromNodes(nodes.value)
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:loadNodes', message: '连接生成结果', data: { generatedCount: generatedConnections.length, existingCount: connections.value.length, connections: generatedConnections.slice(0, 3).map(c => ({ from: c.fromNodeId, to: c.toNodeId })) }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'E' }) }).catch(() => { });
+        // #endregion
+
+        // 更新连接（完全替换，因为连接是基于节点数据生成的）
+        connections.value = generatedConnections
+        console.log('[DEBUG] 连接已更新（前端生成）:', {
+          生成数量: generatedConnections.length,
+          连接详情: generatedConnections.slice(0, 5).map(c => ({ id: c.id, from: c.fromNodeId, to: c.toNodeId }))
+        })
+
+        // 计算节点位置（树形布局）
+        // 使用 nextTick 确保在 DOM 更新后再计算布局
+        nextTick(() => {
+          calculateTreeLayout()
+          // #region agent log
+          fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:loadNodes', message: '布局计算完成', data: { nodesCount: nodes.value.length, connectionsCount: connections.value.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'F' }) }).catch(() => { });
+          // #endregion
+          console.log('[DEBUG] 布局计算完成，节点数量:', nodes.value.length, '连接数量:', connections.value.length)
+        })
+      } else {
+        console.warn('[DEBUG] 后端返回的数据格式不正确:', result)
+        // 不要清空节点和连接，保留已有数据
+        // setNodes([])
+        // setConnections([])
+      }
     } catch (err: any) {
-      console.error('加载节点失败:', err)
+      console.error('[DEBUG] 加载节点失败:', err)
       throw err
     }
   }
@@ -236,6 +473,241 @@ export const useNodeStore = defineStore('node', () => {
     nodes.value = []
     connections.value = []
     selectedNodeId.value = null
+  }
+
+  /**
+   * 计算树形布局（从上到下）
+   */
+  function calculateTreeLayout() {
+    if (nodes.value.length === 0) return
+
+    // 布局参数
+    const baseX = 600  // 画布中心 x
+    const baseY = 150  // 根节点在顶部
+    const spacingX = 250  // 水平间距
+    const spacingY = 180  // 垂直间距
+
+    // 构建节点映射
+    const nodeMap = new Map(nodes.value.map(n => [n.id, n]))
+
+    // 构建父子关系（从 connections 或 metadata.parent_id）
+    const childrenMap = new Map<string, string[]>()
+    const parentMap = new Map<string, string>()
+
+    console.log('[DEBUG] 开始构建父子关系:', {
+      连接数量: connections.value.length,
+      节点数量: nodes.value.length
+    })
+
+    // 从 connections 构建关系（连接已由前端根据 parent_id 生成）
+    for (const conn of connections.value) {
+      if (!childrenMap.has(conn.fromNodeId)) {
+        childrenMap.set(conn.fromNodeId, [])
+      }
+      childrenMap.get(conn.fromNodeId)!.push(conn.toNodeId)
+      parentMap.set(conn.toNodeId, conn.fromNodeId)
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:calculateTreeLayout', message: '从连接构建关系', data: { from: conn.fromNodeId, to: conn.toNodeId }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'G' }) }).catch(() => { });
+      // #endregion
+      console.log('[DEBUG] 从连接构建关系:', conn.fromNodeId, '->', conn.toNodeId)
+    }
+
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:calculateTreeLayout', message: '父子关系构建完成', data: { connectionsCount: connections.value.length, parentMapSize: parentMap.size, childrenMapSize: childrenMap.size, relationships: Array.from(parentMap.entries()).slice(0, 5).map(([child, parent]) => ({ child, parent })) }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'H' }) }).catch(() => { });
+    // #endregion
+
+    console.log('[DEBUG] 父子关系构建完成:', {
+      父节点数量: parentMap.size,
+      有子节点的节点数量: childrenMap.size,
+      父子关系详情: Array.from(parentMap.entries()).slice(0, 5).map(([child, parent]) => ({ child, parent }))
+    })
+
+    // 找到根节点（没有父节点的节点）
+    // 优先使用前端创建的初始节点（target 节点）作为根节点
+    const targetNodes = nodes.value.filter(n => n.type === 'target' || n.id.startsWith('node-target-'))
+    const rootNodes = targetNodes.length > 0
+      ? targetNodes
+      : nodes.value.filter(n => !parentMap.has(n.id))
+
+    console.log('[DEBUG] 根节点识别:', {
+      目标节点数量: targetNodes.length,
+      根节点数量: rootNodes.length,
+      根节点IDs: rootNodes.map(n => n.id),
+      所有节点IDs: nodes.value.map(n => n.id),
+      有父节点的节点数量: parentMap.size,
+      有子节点的节点数量: childrenMap.size
+    })
+
+    // 如果所有节点都是根节点（没有父子关系），强制水平排列
+    if (rootNodes.length === nodes.value.length && rootNodes.length > 1) {
+      console.log('[DEBUG] 所有节点都是根节点，强制水平排列')
+    }
+
+    // 存储已计算位置的节点
+    const positionedNodes = new Set<string>()
+
+    /**
+     * 递归布局节点树
+     */
+    function layoutNode(nodeId: string, parentX: number, parentY: number, level: number = 0): void {
+      if (positionedNodes.has(nodeId)) return
+
+      const node = nodeMap.get(nodeId)
+      if (!node) return
+
+      // 获取子节点
+      const children = childrenMap.get(nodeId) || []
+
+      if (children.length === 0) {
+        // 叶子节点：直接放在父节点下方
+        if (level === 0) {
+          // 根节点
+          node.x = baseX
+          node.y = baseY
+        } else {
+          node.x = parentX
+          node.y = parentY + spacingY
+        }
+        positionedNodes.add(nodeId)
+      } else {
+        // 有子节点：先布局所有子节点（水平排列），然后将自己放在子节点的中心上方
+        const childPositions: Array<{ x: number; y: number }> = []
+
+        // 计算子节点的总宽度
+        const totalChildWidth = (children.length - 1) * spacingX
+        const childStartX = parentX - totalChildWidth / 2
+
+        // 布局每个子节点（水平排列）
+        for (let i = 0; i < children.length; i++) {
+          const childId = children[i]
+          const childX = childStartX + i * spacingX
+          layoutNode(childId, childX, parentY + spacingY, level + 1)
+          const childNode = nodeMap.get(childId)
+          if (childNode) {
+            childPositions.push({ x: childNode.x, y: childNode.y })
+          }
+        }
+
+        if (childPositions.length > 0) {
+          // 计算子节点的中心 x 坐标
+          const minX = Math.min(...childPositions.map(p => p.x))
+          const maxX = Math.max(...childPositions.map(p => p.x))
+          const centerX = (minX + maxX) / 2
+
+          // 父节点放在子节点中心上方
+          if (level === 0) {
+            node.x = centerX
+            node.y = baseY
+          } else {
+            node.x = centerX
+            node.y = Math.min(...childPositions.map(p => p.y)) - spacingY
+          }
+        } else {
+          // 如果没有子节点位置，使用默认位置
+          node.x = parentX
+          node.y = parentY + spacingY
+        }
+
+        positionedNodes.add(nodeId)
+      }
+    }
+
+    // 布局所有根节点
+    if (rootNodes.length === 1) {
+      // 单个根节点
+      const rootNode = rootNodes[0]
+      // 如果是前端创建的初始节点，保持其原有位置或使用默认位置
+      if (rootNode.type === 'target' || rootNode.id.startsWith('node-target-')) {
+        if (rootNode.x === 0 && rootNode.y === 0) {
+          rootNode.x = baseX
+          rootNode.y = baseY
+        }
+        positionedNodes.add(rootNode.id)
+        // 布局子节点（水平排列）
+        const children = childrenMap.get(rootNode.id) || []
+        if (children.length > 0) {
+          const totalChildWidth = (children.length - 1) * spacingX
+          const childStartX = rootNode.x - totalChildWidth / 2
+          for (let i = 0; i < children.length; i++) {
+            const childId = children[i]
+            const childX = childStartX + i * spacingX
+            layoutNode(childId, childX, rootNode.y, 1)
+          }
+        }
+      } else {
+        layoutNode(rootNode.id, baseX, baseY, 0)
+      }
+    } else if (rootNodes.length > 1) {
+      // 多个根节点，水平排列（确保不重合）
+      const totalWidth = (rootNodes.length - 1) * spacingX
+      const startX = baseX - totalWidth / 2
+
+      console.log('[DEBUG] 布局多个根节点:', {
+        数量: rootNodes.length,
+        总宽度: totalWidth,
+        起始X: startX,
+        间距: spacingX
+      })
+
+      for (let i = 0; i < rootNodes.length; i++) {
+        const rootNode = rootNodes[i]
+        rootNode.x = startX + i * spacingX
+        rootNode.y = baseY
+        positionedNodes.add(rootNode.id)
+        console.log('[DEBUG] 根节点位置:', rootNode.id, `(${rootNode.x}, ${rootNode.y})`)
+
+        // 布局子节点（水平排列）
+        const children = childrenMap.get(rootNode.id) || []
+        if (children.length > 0) {
+          const totalChildWidth = (children.length - 1) * spacingX
+          const childStartX = rootNode.x - totalChildWidth / 2
+          for (let j = 0; j < children.length; j++) {
+            const childId = children[j]
+            const childX = childStartX + j * spacingX
+            layoutNode(childId, childX, rootNode.y, 1)
+          }
+        }
+      }
+    } else {
+      // 没有根节点，按顺序布局（平铺）
+      for (let i = 0; i < nodes.value.length; i++) {
+        const node = nodes.value[i]
+        if (!positionedNodes.has(node.id)) {
+          node.x = baseX + (i - nodes.value.length / 2) * spacingX
+          node.y = baseY
+          positionedNodes.add(node.id)
+        }
+      }
+    }
+
+    // 确保所有节点都有位置（防止重合）
+    const unpositionedNodes = nodes.value.filter(n => !positionedNodes.has(n.id))
+    if (unpositionedNodes.length > 0) {
+      console.log('[DEBUG] 发现未定位的节点，按顺序布局:', unpositionedNodes.length)
+      // 找到已定位节点的最大Y坐标
+      const maxY = nodes.value
+        .filter(n => positionedNodes.has(n.id))
+        .reduce((max, n) => Math.max(max, n.y), baseY)
+
+      // 水平排列未定位的节点
+      const totalWidth = (unpositionedNodes.length - 1) * spacingX
+      const startX = baseX - totalWidth / 2
+
+      for (let i = 0; i < unpositionedNodes.length; i++) {
+        const node = unpositionedNodes[i]
+        node.x = startX + i * spacingX
+        node.y = maxY + spacingY
+        positionedNodes.add(node.id)
+        console.log('[DEBUG] 未定位节点位置:', node.id, `(${node.x}, ${node.y})`)
+      }
+    }
+
+    console.log('[DEBUG] 树形布局计算完成:', {
+      节点数量: nodes.value.length,
+      已定位节点: positionedNodes.size,
+      连接数量: connections.value.length,
+      节点位置示例: nodes.value.slice(0, 3).map(n => ({ id: n.id, x: n.x, y: n.y }))
+    })
   }
 
   return {
@@ -272,6 +744,7 @@ export const useNodeStore = defineStore('node', () => {
     loadNodes,
     loadNodeById,
     reset,
+    calculateTreeLayout,
   }
 })
 

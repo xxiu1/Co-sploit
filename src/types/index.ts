@@ -142,6 +142,17 @@ export interface PauseResumeRequest {
   action: 'pause' | 'resume'
 }
 
+// ========== Action 相关 ==========
+export interface Action {
+  action_id: number
+  command: string
+  parent_node: number
+  result: 'success' | 'failed' | 'unknown'
+  analyze_context?: string
+  risk_score?: number
+  timestamp: string
+}
+
 // ========== WebSocket 消息 ==========
 export interface WSMessage {
   type:
@@ -154,7 +165,10 @@ export interface WSMessage {
     | 'system_command_output'
     | 'terminal_connected'
     | 'terminal_disconnected'
+    | 'action_created'
+    | 'action_updated'
+    | 'action_completed'
   data: any
-  timestamp: string
+  timestamp?: string
 }
 

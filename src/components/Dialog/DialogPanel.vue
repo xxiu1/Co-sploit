@@ -33,6 +33,51 @@
         <p class="text-sm">等待开始渗透测试流程...</p>
       </div>
 
+      <!-- 正在执行的 Actions -->
+      <div
+        v-if="executingActions.length > 0"
+        class="mb-4 p-3 bg-yellow-900/20 border border-yellow-700/50 rounded-lg"
+      >
+        <div class="flex items-center gap-2 mb-2">
+          <i class="fas fa-spinner fa-spin text-yellow-400"></i>
+          <span class="text-sm font-semibold text-yellow-300">正在执行的操作</span>
+          <span class="text-xs bg-yellow-900/50 text-yellow-300 px-2 py-0.5 rounded">
+            {{ executingActions.length }}
+          </span>
+        </div>
+        <div class="space-y-2">
+          <div
+            v-for="action in executingActions"
+            :key="action.action_id"
+            class="bg-dark-bg/50 border border-yellow-700/30 rounded p-2 text-xs"
+          >
+            <div class="flex items-start justify-between gap-2">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1">
+                  <i class="fas fa-terminal text-yellow-400"></i>
+                  <code class="text-yellow-200 font-mono truncate">{{ action.command }}</code>
+                </div>
+                <div v-if="action.risk_score !== null && action.risk_score !== undefined" class="flex items-center gap-2 mt-1">
+                  <span class="text-gray-400">风险得分:</span>
+                  <span
+                    class="px-2 py-0.5 rounded text-xs font-semibold"
+                    :class="getRiskScoreClass(action.risk_score)"
+                  >
+                    {{ action.risk_score }}
+                  </span>
+                </div>
+                <div v-if="action.parent_node" class="text-gray-500 mt-1">
+                  任务 ID: {{ action.parent_node }}
+                </div>
+              </div>
+              <div class="text-gray-500 text-[10px] whitespace-nowrap">
+                {{ formatTime(action.timestamp) }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <DialogMessage
         v-for="message in messages"
         :key="message.id"
@@ -103,8 +148,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
-import { useDialogStore, useSystemStore, useNodeStore, useExecutionStore } from '@/stores'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { useDialogStore, useSystemStore, useNodeStore, useExecutionStore, useActionStore } from '@/stores'
 import { executeAction } from '@/api'
 import { generateNodeFromNextNode, generateConnection } from '@/utils/nodeGenerator'
 import { generateId } from '@/utils'
@@ -116,6 +161,9 @@ const dialogStore = useDialogStore()
 const systemStore = useSystemStore()
 const nodeStore = useNodeStore()
 const executionStore = useExecutionStore()
+const actionStore = useActionStore()
+
+const executingActions = computed(() => actionStore.executingActions)
 
 const messagesContainerRef = ref<HTMLElement>()
 const userInput = ref('')
@@ -184,6 +232,54 @@ function removeSelectedItem(id: string) {
     selectedItems.value.splice(index, 1)
   }
 }
+
+// Action 相关函数
+function getRiskScoreClass(score: number): string {
+  if (score >= 80) return 'bg-red-900/50 text-red-300 border border-red-700'
+  if (score >= 50) return 'bg-orange-900/50 text-orange-300 border border-orange-700'
+  if (score >= 20) return 'bg-yellow-900/50 text-yellow-300 border border-yellow-700'
+  return 'bg-green-900/50 text-green-300 border border-green-700'
+}
+
+function formatTime(timestamp: string): string {
+  if (!timestamp) return ''
+  try {
+    const date = new Date(timestamp)
+    const now = new Date()
+    const diff = now.getTime() - date.getTime()
+    const seconds = Math.floor(diff / 1000)
+    const minutes = Math.floor(seconds / 60)
+    
+    if (seconds < 60) return `${seconds}秒前`
+    if (minutes < 60) return `${minutes}分钟前`
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  } catch {
+    return ''
+  }
+}
+
+// 初始化 Action Store
+let refreshInterval: ReturnType<typeof setInterval> | null = null
+
+onMounted(async () => {
+  // 初始化 WebSocket 监听
+  actionStore.initWebSocketListeners()
+  
+  // 获取正在执行的 actions
+  await actionStore.fetchExecutingActions()
+  
+  // 定期刷新正在执行的 actions（每5秒）
+  refreshInterval = setInterval(() => {
+    actionStore.fetchExecutingActions()
+  }, 5000)
+})
+
+onUnmounted(() => {
+  if (refreshInterval) {
+    clearInterval(refreshInterval)
+  }
+  actionStore.cleanupWebSocketListeners()
+})
 
 // 处理操作确认
 async function handleActionConfirm(messageId: string, actionPlanId: string) {

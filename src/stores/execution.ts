@@ -194,8 +194,10 @@ export const useExecutionStore = defineStore('execution', () => {
       const historyList = await getExecutionHistory()
       setHistory(historyList as ExecutionHistoryItem[])
     } catch (err: any) {
-      console.error('加载执行历史失败:', err)
-      throw err
+      // 如果后端端点不存在，只记录警告，不抛出错误
+      console.warn('加载执行历史失败（可能后端未实现）:', err.message || err)
+      // 不抛出错误，允许继续执行
+      setHistory([])
     }
   }
 

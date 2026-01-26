@@ -17,8 +17,8 @@
       @mouseup="onStageMouseUp"
     >
       <v-layer ref="connectionsLayerRef">
-        <!-- 连线 -->
-        <v-line
+        <!-- 连线（使用箭头表示父子关系） -->
+        <v-arrow
           v-for="connection in connections"
           :key="connection.id"
           :config="getConnectionConfig(connection)"
@@ -68,23 +68,30 @@
         <i class="fas fa-home"></i>
       </button>
     </div>
+
+    <!-- 节点详情对话框 -->
+    <NodeDetailDialog
+      v-model="showNodeDetail"
+      :node="selectedNode"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useNodeStore, useCanvasStore } from '@/stores'
 import type { Node, Connection } from '@/types'
 import NodeComponent from './NodeComponent.vue'
+import NodeDetailDialog from './NodeDetailDialog.vue'
 
 const nodeStore = useNodeStore()
 const canvasStore = useCanvasStore()
 
 // Refs
 const containerRef = ref<HTMLElement>()
-const stageRef = ref<InstanceType<typeof Stage>>()
-const connectionsLayerRef = ref<InstanceType<typeof Layer>>()
-const nodesLayerRef = ref<InstanceType<typeof Layer>>()
+const stageRef = ref<any>()
+const connectionsLayerRef = ref<any>()
+const nodesLayerRef = ref<any>()
 
 // State
 const selectedNodeId = computed(() => nodeStore.selectedNodeId)
@@ -92,6 +99,13 @@ const nodes = computed(() => nodeStore.nodes)
 const connections = computed(() => nodeStore.connections)
 const isDragging = ref(false)
 const dragStartPos = ref({ x: 0, y: 0 })
+const showNodeDetail = ref(false)
+
+// 选中的节点（用于详情对话框）
+const selectedNode = computed(() => {
+  if (!selectedNodeId.value) return null
+  return nodeStore.getNode(selectedNodeId.value) || null
+})
 
 // Stage config
 const stageConfig = computed(() => ({
@@ -135,23 +149,40 @@ const stageLines = computed(() => {
   return lines
 })
 
-// 连线配置
+// 连线配置（从父节点指向子节点，从上到下）
 function getConnectionConfig(connection: Connection) {
   const fromNode = nodeStore.getNode(connection.fromNodeId)
   const toNode = nodeStore.getNode(connection.toNodeId)
 
   if (!fromNode || !toNode) {
+    // 节点不存在时不显示连线
     return { points: [0, 0, 0, 0], visible: false }
   }
 
+  // 检查节点位置是否有效（不为0或已计算）
+  if ((fromNode.x === 0 && fromNode.y === 0) || (toNode.x === 0 && toNode.y === 0)) {
+    // 节点位置还未计算，暂时不显示连线
+    return { points: [0, 0, 0, 0], visible: false }
+  }
+
+  // 连线从父节点底部指向子节点顶部
+  // 节点中心到边缘的偏移（节点半径约为 24px）
+  const nodeRadius = 24
+  const fromY = fromNode.y + nodeRadius  // 父节点底部
+  const toY = toNode.y - nodeRadius      // 子节点顶部
+
   return {
-    points: [fromNode.x, fromNode.y, toNode.x, toNode.y],
+    points: [fromNode.x, fromY, toNode.x, toY],
     stroke: '#6b7280',
+    fill: '#6b7280',
     strokeWidth: 2,
-    lineCap: 'round',
-    lineJoin: 'round',
+    lineCap: 'round' as const,
+    lineJoin: 'round' as const,
     dash: [5, 5],
-    opacity: 0.6,
+    opacity: 0.7,
+    pointerLength: 10,  // 箭头长度
+    pointerWidth: 8,     // 箭头宽度
+    visible: true,
   }
 }
 
@@ -219,7 +250,11 @@ function onStageMouseUp(e: any) {
 
 // 节点事件
 function handleNodeClick(node: Node) {
+  console.log('[DEBUG] 节点被点击:', node.id, node.title)
   nodeStore.selectNode(node.id)
+  // 显示节点详情对话框
+  showNodeDetail.value = true
+  console.log('[DEBUG] 节点详情对话框应该已打开，selectedNode:', selectedNode.value)
 }
 
 function handleNodeDragEnd(node: Node, e: any) {
@@ -259,12 +294,36 @@ function updateStagePosition() {
   // 更新 stage 位置
   if (stageRef.value) {
     const stage = stageRef.value.getStage()
-    stage.x(canvasStore.offsetX)
-    stage.y(canvasStore.offsetY)
-    stage.scaleX(canvasStore.scale)
-    stage.scaleY(canvasStore.scale)
-    stage.draw()
+    if (stage) {
+      stage.x(canvasStore.offsetX)
+      stage.y(canvasStore.offsetY)
+      stage.scaleX(canvasStore.scale)
+      stage.scaleY(canvasStore.scale)
+      stage.draw()
+    }
   }
+}
+
+// 强制重绘画布
+function forceRedraw() {
+  nextTick(() => {
+    try {
+      if (connectionsLayerRef.value) {
+        const layer = connectionsLayerRef.value.getNode()
+        if (layer) layer.draw()
+      }
+      if (nodesLayerRef.value) {
+        const layer = nodesLayerRef.value.getNode()
+        if (layer) layer.draw()
+      }
+      if (stageRef.value) {
+        const stage = stageRef.value.getStage()
+        if (stage) stage.draw()
+      }
+    } catch (error) {
+      console.warn('[DEBUG] 重绘画布时出错:', error)
+    }
+  })
 }
 
 // 监听画布状态变化
@@ -275,15 +334,24 @@ watch(
   }
 )
 
-// 监听节点变化，更新连线
+// 监听节点变化，更新连线并强制重绘
 watch(
   () => nodes.value,
   () => {
-    if (connectionsLayerRef.value) {
-      connectionsLayerRef.value.getLayer()?.draw()
-    }
+    console.log('[DEBUG] 节点列表已更新，节点数量:', nodes.value.length)
+    forceRedraw()
   },
-  { deep: true }
+  { deep: true, immediate: false }
+)
+
+// 监听连接变化，更新连线
+watch(
+  () => connections.value,
+  () => {
+    console.log('[DEBUG] 连接列表已更新，连接数量:', connections.value.length)
+    forceRedraw()
+  },
+  { deep: true, immediate: false }
 )
 
 onMounted(() => {
@@ -293,6 +361,10 @@ onMounted(() => {
     const height = containerRef.value.clientHeight
     // 可以在这里设置初始视图
   }
+  // 确保初始节点显示
+  nextTick(() => {
+    forceRedraw()
+  })
 })
 
 onUnmounted(() => {

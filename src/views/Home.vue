@@ -70,7 +70,7 @@ import { wsManager } from '@/utils/websocket'
 import { generateNodeFromNextNode, generateConnection, getAttackSurfaceStage } from '@/utils/nodeGenerator'
 import { getActionPlans, executeAction } from '@/api'
 import { generateId } from '@/utils'
-import type { Node, Clue, WSMessage, Connection, ExecutionResult, ActionPlan, NextNode } from '@/types'
+import type { Node, Clue, WSMessage, Connection, ExecutionResult, ActionPlan, NextNode, SystemStatus } from '@/types'
 
 const systemStore = useSystemStore()
 const nodeStore = useNodeStore()
@@ -96,17 +96,15 @@ async function handleStartFlow(targetIP: string) {
     dialogStore.addSystemMessage('🚀 正在启动自动化渗透测试流程...')
     terminalRef.value?.writeCommand(`Starting automated penetration test for target: ${targetIP}`)
 
-    // 2. 初始化 WebSocket 连接（在启动前连接，以便接收初始数据）
-    // 注意：如果后端未运行，WebSocket 连接会失败，但不影响界面演示
+    // 2. 初始化 WebSocket 连接（在启动前连接，以便接收实时更新）
     if (!wsManager.isConnected) {
       terminalRef.value?.writeOutput('Connecting to backend WebSocket...\r\n')
       try {
         await wsManager.connect()
         terminalRef.value?.writeOutput('\x1b[32mWebSocket connected\r\n\x1b[0m')
       } catch (error: any) {
-        terminalRef.value?.writeOutput('\x1b[33mWarning: WebSocket connection failed (backend may not be running)\r\n\x1b[0m')
-        terminalRef.value?.writeOutput('Continuing in demo mode...\r\n')
-        // WebSocket 连接失败不影响界面演示，继续执行
+        terminalRef.value?.writeOutput('\x1b[33mWarning: WebSocket connection failed\r\n\x1b[0m')
+        // WebSocket 连接失败不影响基本功能，继续执行
       }
     }
 
@@ -119,17 +117,15 @@ async function handleStartFlow(targetIP: string) {
       const systemState = await systemStore.start(targetIP)
       terminalRef.value?.writeOutput('\x1b[32mBackend response received\r\n\x1b[0m')
     } catch (error: any) {
-      terminalRef.value?.writeOutput('\x1b[33mWarning: Backend API call failed (backend may not be running)\r\n\x1b[0m')
-      terminalRef.value?.writeOutput('Running in demo mode with mock data...\r\n')
-      // API 调用失败时，设置系统状态为运行中（演示模式）
-      systemStore.setStatus('running')
-      systemStore.setTargetIP(targetIP)
+      terminalRef.value?.writeOutput(`\x1b[31mError: Backend API call failed: ${error.message || 'Unknown error'}\x1b[0m\r\n`)
+      throw error  // 重新抛出错误，让上层处理
     }
 
-    // 5. 创建初始 target 节点（如果后端没有返回）
+    // 5. 创建初始节点（目标设立）
     await createInitialNode(targetIP)
+    console.log('[DEBUG] 初始节点已创建:', targetIP)
 
-    // 6. 加载初始数据
+    // 6. 加载初始数据（从数据库获取真实的 tasks 和 clues）
     await loadInitialData()
 
     // 7. 添加系统消息
@@ -160,8 +156,7 @@ async function handleStartFlow(targetIP: string) {
     dialogStore.addErrorMessage(`启动失败: ${error.message || '未知错误'}`)
     systemStore.setError(error.message || '启动流程失败')
     terminalRef.value?.writeOutput(`\x1b[31mFailed to start flow: ${error.message || 'Unknown error'}\x1b[0m\r\n`)
-    // 演示模式：加载本地模拟数据
-    await loadDemoData(targetIP)
+    // 不再加载演示数据，只显示错误
   }
 }
 
@@ -180,16 +175,17 @@ async function createInitialNode(targetIP: string) {
     return
   }
 
-  // 创建新的 target 节点
+  // 创建新的 target 节点 - 确保在可见区域内
   const containerWidth = window.innerWidth * 0.6 // 画布区域宽度
+  const containerHeight = window.innerHeight * 0.8 // 画布区域高度
   const initialNode: Node = {
     id: `node-target-${Date.now()}`,
     type: 'target',
     title: `TARGET\n${targetIP}`,
     icon: 'fa-server',
     color: 'gray',
-    x: containerWidth / 2,
-    y: 100,
+    x: Math.max(400, containerWidth / 2), // 确保在可见区域内
+    y: Math.max(200, containerHeight / 2 - 100), // 确保在可见区域内
     status: 'pending',
     stage: 1,
     metadata: {
@@ -268,12 +264,17 @@ async function loadInitialData() {
     // 加载线索
     await clueStore.loadClues()
 
-    // 加载执行历史
-    await executionStore.loadHistory()
+    // 加载执行历史（如果失败不影响其他功能）
+    try {
+      await executionStore.loadHistory()
+    } catch (error) {
+      // 执行历史加载失败不影响其他功能
+      console.warn('加载执行历史失败（不影响其他功能）:', error)
+    }
   } catch (error) {
     console.error('加载初始数据失败:', error)
-    // 如果后端不可用，加载本地模拟数据
-    await loadDemoData(systemStore.targetIP || '10.129.234.72')
+    // 不再加载演示数据，只记录错误
+    terminalRef.value?.writeOutput(`\x1b[33mWarning: Failed to load initial data from backend\x1b[0m\r\n`)
   }
 }
 
@@ -702,9 +703,20 @@ async function processExecutionQueue() {
 
   try {
     // 获取节点的操作计划
-    const scenario = await getActionPlans(node.type)
+    let scenario = null
+    try {
+      scenario = await getActionPlans(node.type)
+    } catch (err: any) {
+      // 404 错误表示后端未实现此端点，跳过
+      if (err?.response?.status === 404) {
+        console.warn('getActionPlans 端点未实现，跳过操作计划获取')
+      } else {
+        throw err // 其他错误继续抛出
+      }
+    }
+    
     if (!scenario || !scenario.actionPlans || scenario.actionPlans.length === 0) {
-      dialogStore.addWarningMessage(`节点 ${node.title} 没有可用的操作计划`)
+      // 如果没有操作计划，从队列中移除并处理下一个
       executionStore.removeFromQueue(queueItem.nodeId)
       processExecutionQueue()
       return
@@ -760,12 +772,100 @@ watch(
 )
 
 
+// 定时轮询节点数据（当系统运行时）
+let nodesPollInterval: ReturnType<typeof setInterval> | null = null
+
+function startNodesPolling() {
+  // 如果已经有定时器，先清除
+  if (nodesPollInterval) {
+    clearInterval(nodesPollInterval)
+  }
+  
+  // 每 1 秒轮询一次节点数据（提高实时性）
+  nodesPollInterval = setInterval(async () => {
+    if (systemStore.isRunning || systemStore.isPaused) {
+      try {
+        await nodeStore.loadNodes()
+        await clueStore.loadClues()
+      } catch (error) {
+        console.error('轮询节点数据失败:', error)
+      }
+    }
+  }, 1000) // 1秒轮询一次，提高实时性
+}
+
+function stopNodesPolling() {
+  if (nodesPollInterval) {
+    clearInterval(nodesPollInterval)
+    nodesPollInterval = null
+  }
+}
+
+// 监听系统状态变化，自动开始/停止轮询
+// 注意：只在状态从非运行状态变为运行状态时才开始轮询，避免页面刷新后自动开始
+let previousStatus: SystemStatus = 'idle'
+let isInitialMount = true
+
+watch(() => systemStore.status, async (newStatus) => {
+  console.log('[DEBUG] 系统状态变化:', { from: previousStatus, to: newStatus, isInitialMount })
+  
+  // 如果是首次挂载，记录初始状态
+  if (isInitialMount) {
+    previousStatus = newStatus
+    isInitialMount = false
+    // 如果初始状态就是 running/paused（可能是页面刷新后的状态恢复），也要启动轮询
+    if (newStatus === 'running' || newStatus === 'paused') {
+      console.log('[DEBUG] 检测到系统可能处于运行状态（页面刷新后的状态恢复），启动轮询')
+      startNodesPolling()
+      // 立即加载一次节点数据，确保显示最新状态
+      try {
+        await nodeStore.loadNodes()
+        await clueStore.loadClues()
+      } catch (error) {
+        console.error('初始加载节点数据失败:', error)
+      }
+    }
+    return
+  }
+  
+  // 只有在状态变为 running 或 paused 时才开始轮询
+  if ((newStatus === 'running' || newStatus === 'paused') && 
+      previousStatus !== 'running' && previousStatus !== 'paused') {
+    console.log('[DEBUG] 开始轮询节点数据')
+    startNodesPolling()
+  } else if (newStatus === 'completed') {
+    // 系统完成：停止轮询，但保留节点数据
+    console.log('[DEBUG] 系统完成，停止轮询但保留节点数据')
+    stopNodesPolling()
+    // 最后一次加载节点数据，确保数据完整
+    try {
+      await nodeStore.loadNodes()
+      await clueStore.loadClues()
+    } catch (error) {
+      console.warn('[DEBUG] 系统完成后加载节点失败（不影响显示）:', error)
+    }
+  } else if (newStatus !== 'running' && newStatus !== 'paused') {
+    // 其他非运行状态，停止轮询
+    console.log('[DEBUG] 停止轮询节点数据')
+    stopNodesPolling()
+  }
+  
+  previousStatus = newStatus
+})
+
 onMounted(() => {
   // 初始化 stores 的 WebSocket 监听
   systemStore.initWebSocket()
   nodeStore.initWebSocket()
   clueStore.initWebSocket()
   executionStore.initWebSocket()
+  
+  // 确保轮询已停止（防止从之前的状态恢复）
+  stopNodesPolling()
+  console.log('[DEBUG] 组件已挂载，轮询已停止（等待用户启动系统）')
+  
+  // 初始化 previousStatus
+  previousStatus = systemStore.status
 })
 
 onUnmounted(() => {

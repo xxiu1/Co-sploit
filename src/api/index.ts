@@ -40,9 +40,9 @@ export function getSystemState(): Promise<SystemState> {
 // ========== 节点管理 ==========
 
 /**
- * 获取所有节点
+ * 获取所有节点（前后端分离：连接由前端根据 parent_id 生成）
  */
-export function getNodes(): Promise<Node[]> {
+export function getNodes(): Promise<{ nodes: Node[] }> {
   return request.get('/nodes')
 }
 
@@ -106,5 +106,40 @@ export function markClue(clueId: string, marked: boolean): Promise<Clue> {
  */
 export function getExecutionHistory(): Promise<any[]> {
   return request.get('/execution/history')
+}
+
+// ========== Action 管理 ==========
+
+import type { Action } from '@/types'
+
+/**
+ * 获取所有 actions
+ */
+export function getActions(params?: {
+  task_id?: number
+  status?: string
+  limit?: number
+}): Promise<{ code: number; message: string; data: Action[] }> {
+  const queryParams = new URLSearchParams()
+  if (params?.task_id) queryParams.append('task_id', params.task_id.toString())
+  if (params?.status) queryParams.append('status', params.status)
+  if (params?.limit) queryParams.append('limit', params.limit.toString())
+  
+  const query = queryParams.toString()
+  return request.get(`/actions${query ? `?${query}` : ''}`)
+}
+
+/**
+ * 获取正在执行的 actions
+ */
+export function getExecutingActions(): Promise<{ code: number; message: string; data: Action[] }> {
+  return request.get('/actions/executing')
+}
+
+/**
+ * 获取单个 action 详情
+ */
+export function getActionById(actionId: number): Promise<{ code: number; message: string; data: Action }> {
+  return request.get(`/actions/${actionId}`)
 }
 

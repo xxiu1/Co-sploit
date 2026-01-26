@@ -5,30 +5,18 @@
     @dragend="handleDragEnd"
     @contextmenu="handleContextMenu"
   >
-    <!-- 节点状态光环（执行中） -->
+    <!-- 节点状态光环（执行中）- 动态光圈 -->
     <v-circle
       v-if="node.status === 'executing'"
-      :config="{
-        x: 0,
-        y: 0,
-        radius: 30,
-        stroke: '#fbbf24',
-        strokeWidth: 2,
-        opacity: 0.6,
-        listening: false,
-      }"
+      :config="pulseCircleConfig1"
     />
     <v-circle
       v-if="node.status === 'executing'"
-      :config="{
-        x: 0,
-        y: 0,
-        radius: 35,
-        stroke: '#fbbf24',
-        strokeWidth: 1,
-        opacity: 0.3,
-        listening: false,
-      }"
+      :config="pulseCircleConfig2"
+    />
+    <v-circle
+      v-if="node.status === 'executing'"
+      :config="pulseCircleConfig3"
     />
 
     <!-- 节点主体 -->
@@ -77,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import type { Node } from '@/types'
 
 // 注意：vue-konva 3.0 使用方式
@@ -97,6 +85,89 @@ const emit = defineEmits<{
   dragEnd: [node: Node, e: any]
   contextmenu: [node: Node, e: MouseEvent]
 }>()
+
+// 动态光圈动画
+const pulseOpacity = ref(0.8)
+const pulseRadius = ref(30)
+let animationFrame: number | null = null
+let isAnimating = false
+
+function startAnimation() {
+  if (isAnimating) return
+  isAnimating = true
+  animatePulse()
+}
+
+function stopAnimation() {
+  isAnimating = false
+  if (animationFrame !== null) {
+    cancelAnimationFrame(animationFrame)
+    animationFrame = null
+  }
+}
+
+function animatePulse() {
+  if (!isAnimating || props.node.status !== 'executing') {
+    stopAnimation()
+    return
+  }
+  
+  const time = Date.now() * 0.003
+  pulseOpacity.value = 0.3 + Math.sin(time) * 0.3
+  pulseRadius.value = 30 + Math.sin(time * 1.5) * 8
+  
+  animationFrame = requestAnimationFrame(animatePulse)
+}
+
+onMounted(() => {
+  if (props.node.status === 'executing') {
+    startAnimation()
+  }
+})
+
+onUnmounted(() => {
+  stopAnimation()
+})
+
+// 监听节点状态变化
+watch(() => props.node.status, (newStatus) => {
+  if (newStatus === 'executing') {
+    startAnimation()
+  } else {
+    stopAnimation()
+  }
+})
+
+// 动态光圈配置
+const pulseCircleConfig1 = computed(() => ({
+  x: 0,
+  y: 0,
+  radius: pulseRadius.value,
+  stroke: '#fbbf24',
+  strokeWidth: 2,
+  opacity: pulseOpacity.value,
+  listening: false,
+}))
+
+const pulseCircleConfig2 = computed(() => ({
+  x: 0,
+  y: 0,
+  radius: pulseRadius.value + 5,
+  stroke: '#fbbf24',
+  strokeWidth: 1.5,
+  opacity: pulseOpacity.value * 0.6,
+  listening: false,
+}))
+
+const pulseCircleConfig3 = computed(() => ({
+  x: 0,
+  y: 0,
+  radius: pulseRadius.value + 10,
+  stroke: '#fbbf24',
+  strokeWidth: 1,
+  opacity: pulseOpacity.value * 0.3,
+  listening: false,
+}))
 
 // 颜色映射
 const colorMap = {
@@ -148,7 +219,7 @@ const circleConfig = computed(() => {
 // Icon 配置
 const iconConfig = computed(() => {
   // 使用 Font Awesome 图标，需要转换为文本
-  // 这里简化处理，实际应该使用图标字体或 SVG
+  // 确保使用正确的字体名称
   const iconText = getIconText(props.node.icon)
   const statusColor = statusColorMap[props.node.status]
   const nodeColor = colorMap[props.node.color] || colorMap.gray
@@ -157,8 +228,9 @@ const iconConfig = computed(() => {
     x: 0,
     y: 0,
     text: iconText,
-    fontSize: 20,
-    fontFamily: 'FontAwesome',
+    fontSize: 18,
+    fontFamily: '"Font Awesome 6 Free"', // 使用正确的字体名称
+    fontStyle: '900', // Solid 图标需要 900 字重
     fill: props.node.status !== 'pending' ? statusColor.border : nodeColor.text,
     align: 'center',
     verticalAlign: 'middle',
@@ -183,25 +255,31 @@ const titleConfig = computed(() => ({
   wrap: 'word',
 }))
 
-// 获取图标文本（简化处理）
+// 获取图标文本（Font Awesome 6 Free Unicode）
 function getIconText(icon: string): string {
-  // Font Awesome 图标类名转换为 Unicode
-  // 这里需要根据实际图标映射
+  // Font Awesome 6 Free 图标类名转换为 Unicode
+  // 使用 Font Awesome 6 的 Unicode 值
   const iconMap: Record<string, string> = {
-    'fa-server': '\uf233',
-    'fa-laptop-code': '\uf5fc',
-    'fa-network-wired': '\uf6ff',
-    'fa-shield-alt': '\uf3ed',
-    'fa-user-secret': '\uf21b',
-    'fa-key': '\uf084',
-    'fa-database': '\uf1c0',
-    'fa-file-code': '\uf1c9',
+    'fa-server': '\uf233', // server
+    'fa-tasks': '\uf0ae', // tasks (list-check)
+    'fa-laptop-code': '\uf5fc', // laptop-code
+    'fa-network-wired': '\uf6ff', // network-wired
+    'fa-shield-alt': '\uf3ed', // shield-alt (shield-halved)
+    'fa-user-secret': '\uf21b', // user-secret
+    'fa-key': '\uf084', // key
+    'fa-database': '\uf1c0', // database
+    'fa-file-code': '\uf1c9', // file-code
+    'fa-terminal': '\uf120', // terminal
+    'fa-bug': '\uf188', // bug
+    'fa-search': '\uf002', // search
   }
-  return iconMap[icon] || '\uf233'
+  return iconMap[icon] || '\uf0ae' // 默认使用 tasks 图标
 }
 
 // 事件处理
-function handleClick() {
+function handleClick(e: any) {
+  console.log('[DEBUG] NodeComponent 节点被点击:', props.node.id, props.node.title, e)
+  e.cancelBubble = true // 阻止事件冒泡
   emit('click', props.node)
 }
 
