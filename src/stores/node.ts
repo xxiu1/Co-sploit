@@ -4,7 +4,7 @@
  */
 
 import { defineStore } from 'pinia'
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed } from 'vue'
 import type { Node, NodeStatus, Connection } from '@/types'
 
 // 导入 Connection 类型（如果还没有）
@@ -98,11 +98,20 @@ export const useNodeStore = defineStore('node', () => {
 
   /**
    * 更新节点
+   * 合并时保留已有 x,y，避免后端传入 0,0 覆盖前端布局导致节点“乱跑”
    */
   function updateNode(node: Node) {
     const index = nodes.value.findIndex((n) => n.id === node.id)
     if (index >= 0) {
-      nodes.value[index] = { ...nodes.value[index], ...node }
+      const existing = nodes.value[index]
+      const merged = { ...existing, ...node }
+      const incomingZero =
+        (node.x === 0 || node.x === undefined) && (node.y === 0 || node.y === undefined)
+      if (incomingZero && existing.x !== undefined && existing.y !== undefined) {
+        merged.x = existing.x
+        merged.y = existing.y
+      }
+      nodes.value[index] = merged
     } else {
       nodes.value.push(node)
     }
@@ -164,6 +173,13 @@ export const useNodeStore = defineStore('node', () => {
    */
   function setConnections(newConnections: Connection[]) {
     connections.value = newConnections
+  }
+
+  /**
+   * 根据当前 nodes 重新生成连线（用于 WS node_update 合并后刷新连线）
+   */
+  function regenerateConnections() {
+    connections.value = generateConnectionsFromNodes(nodes.value)
   }
 
   /**
@@ -341,7 +357,6 @@ export const useNodeStore = defineStore('node', () => {
 
         // 增量更新：只更新变化的节点
         const oldNodeMap = new Map(nodes.value.map(n => [n.id, n]))
-        const newNodeMap = new Map(newNodes.map(n => [n.id, n]))
 
         // 识别新增和更新的节点
         const addedNodes: Node[] = []
@@ -392,7 +407,12 @@ export const useNodeStore = defineStore('node', () => {
             deleted: deletedNodeIds.length
           })
 
-          // 更新节点列表
+          // 根节点由前端产生，合并时必须保留，确保连线能连到根
+          const rootsToKeep = nodes.value.filter(
+            n => n.type === 'target' || (n.id != null && String(n.id).startsWith('node-target-'))
+          )
+
+          // 更新节点列表（从当前节点出发做增量）
           const updatedNodeList = [...nodes.value]
 
           // 添加新节点
@@ -416,6 +436,34 @@ export const useNodeStore = defineStore('node', () => {
             }
           }
 
+          // 保证根节点一定在列表中，避免连线悬空
+          for (const r of rootsToKeep) {
+            if (!updatedNodeList.some(x => x.id === r.id)) {
+              updatedNodeList.push(r)
+            }
+          }
+
+          // 若仍无 target 节点（如首次加载、后端未返回），注入默认根节点，确保 generateConnectionsFromNodes 能生成连线
+          const hasTarget = updatedNodeList.some(
+            (n) => n.type === 'target' || (n.id != null && String(n.id).startsWith('node-target-'))
+          )
+          if (!hasTarget) {
+            const containerWidth = typeof window !== 'undefined' ? window.innerWidth * 0.6 : 800
+            const containerHeight = typeof window !== 'undefined' ? window.innerHeight * 0.8 : 600
+            updatedNodeList.push({
+              id: 'node-target-default',
+              type: 'target',
+              title: 'TARGET',
+              icon: 'fa-server',
+              color: 'gray',
+              x: Math.max(400, containerWidth / 2),
+              y: Math.max(200, containerHeight / 2 - 100),
+              status: 'pending',
+              stage: 1,
+              metadata: {}
+            })
+          }
+
           nodes.value = updatedNodeList
         }
 
@@ -432,15 +480,12 @@ export const useNodeStore = defineStore('node', () => {
           连接详情: generatedConnections.slice(0, 5).map(c => ({ id: c.id, from: c.fromNodeId, to: c.toNodeId }))
         })
 
-        // 计算节点位置（树形布局）
-        // 使用 nextTick 确保在 DOM 更新后再计算布局
-        nextTick(() => {
-          calculateTreeLayout()
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:loadNodes', message: '布局计算完成', data: { nodesCount: nodes.value.length, connectionsCount: connections.value.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'F' }) }).catch(() => { });
-          // #endregion
-          console.log('[DEBUG] 布局计算完成，节点数量:', nodes.value.length, '连接数量:', connections.value.length)
-        })
+        // 同步计算节点位置（树形布局），保证首帧渲染时节点已有 x,y，连线可见
+        calculateTreeLayout()
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:loadNodes', message: '布局计算完成', data: { nodesCount: nodes.value.length, connectionsCount: connections.value.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'F' }) }).catch(() => { })
+        // #endregion
+        console.log('[DEBUG] 布局计算完成，节点数量:', nodes.value.length, '连接数量:', connections.value.length)
       } else {
         console.warn('[DEBUG] 后端返回的数据格式不正确:', result)
         // 不要清空节点和连接，保留已有数据
@@ -739,6 +784,7 @@ export const useNodeStore = defineStore('node', () => {
     setConnections,
     addConnection,
     removeConnection,
+    regenerateConnections,
     getChildNodes,
     getParentNodes,
     loadNodes,

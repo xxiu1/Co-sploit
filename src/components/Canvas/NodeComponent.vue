@@ -5,17 +5,17 @@
     @dragend="handleDragEnd"
     @contextmenu="handleContextMenu"
   >
-    <!-- 节点状态光环（执行中）- 动态光圈 -->
+    <!-- 节点状态光环（执行中/进行中）- 动态黄色光圈 -->
     <v-circle
-      v-if="node.status === 'executing'"
+      v-if="isExecutingNode"
       :config="pulseCircleConfig1"
     />
     <v-circle
-      v-if="node.status === 'executing'"
+      v-if="isExecutingNode"
       :config="pulseCircleConfig2"
     />
     <v-circle
-      v-if="node.status === 'executing'"
+      v-if="isExecutingNode"
       :config="pulseCircleConfig3"
     />
 
@@ -106,8 +106,12 @@ function stopAnimation() {
   }
 }
 
+const isExecutingNode = computed(() =>
+  props.node.status === 'executing' || props.node.status === 'in_progress'
+)
+
 function animatePulse() {
-  if (!isAnimating || props.node.status !== 'executing') {
+  if (!isAnimating || !isExecutingNode.value) {
     stopAnimation()
     return
   }
@@ -120,7 +124,7 @@ function animatePulse() {
 }
 
 onMounted(() => {
-  if (props.node.status === 'executing') {
+  if (isExecutingNode.value) {
     startAnimation()
   }
 })
@@ -130,8 +134,8 @@ onUnmounted(() => {
 })
 
 // 监听节点状态变化
-watch(() => props.node.status, (newStatus) => {
-  if (newStatus === 'executing') {
+watch(isExecutingNode, (executing) => {
+  if (executing) {
     startAnimation()
   } else {
     stopAnimation()
@@ -180,11 +184,13 @@ const colorMap = {
   purple: { border: '#a855f7', text: '#c084fc' },
 }
 
-// 状态颜色映射
+// 状态颜色映射：根节点与成功=绿，失败=红，执行中=动态黄
 const statusColorMap = {
   pending: { border: '#6b7280', shadow: 'rgba(107, 114, 128, 0.4)' },
   executing: { border: '#fbbf24', shadow: 'rgba(251, 191, 36, 0.8)' },
+  in_progress: { border: '#fbbf24', shadow: 'rgba(251, 191, 36, 0.8)' },
   success: { border: '#22c55e', shadow: 'rgba(34, 197, 94, 0.7)' },
+  completed: { border: '#22c55e', shadow: 'rgba(34, 197, 94, 0.7)' },
   failed: { border: '#ef4444', shadow: 'rgba(239, 68, 68, 0.7)' },
 }
 
@@ -196,42 +202,54 @@ const groupConfig = computed(() => ({
   listening: true,
 }))
 
-// Circle 配置
+// 根节点或执行成功为绿，失败为红，执行中为动态黄；状态未命中时回退
+const effectiveStatusColor = computed(() => {
+  const isRoot = props.node.type === 'target' || (props.node.id != null && String(props.node.id).startsWith('node-target-'))
+  if (isRoot) return statusColorMap.success
+  const s = props.node.status
+  const mapped = statusColorMap[s as keyof typeof statusColorMap]
+  return mapped ?? (s === 'failed' ? statusColorMap.failed : statusColorMap.pending)
+})
+
+// Circle 配置：根节点始终用绿，成功/完成=绿，失败=红，执行中=动态黄，其余用 statusColor（含根/成功/失败映射）
 const circleConfig = computed(() => {
-  const statusColor = statusColorMap[props.node.status]
+  const statusColor = effectiveStatusColor.value
   const nodeColor = colorMap[props.node.color] || colorMap.gray
+  const isExecuting = props.node.status === 'executing' || props.node.status === 'in_progress'
+  const isRoot = props.node.type === 'target' || (props.node.id != null && String(props.node.id).startsWith('node-target-'))
+  const useStatusColor = isRoot || (props.node.status !== 'pending' && props.node.status !== undefined)
 
   return {
     x: 0,
     y: 0,
     radius: 24,
     fill: '#0b0d14',
-    stroke: props.node.status !== 'pending' ? statusColor.border : nodeColor.border,
-    strokeWidth: props.node.status === 'executing' ? 3 : 2,
+    stroke: useStatusColor ? statusColor.border : nodeColor.border,
+    strokeWidth: isExecuting ? 3 : 2,
     shadowColor: statusColor.shadow,
-    shadowBlur: props.node.status === 'executing' ? 20 : 10,
-    shadowOpacity: props.node.status === 'executing' ? 0.8 : 0.4,
+    shadowBlur: isExecuting ? 20 : 10,
+    shadowOpacity: isExecuting ? 0.8 : 0.4,
     shadowOffsetX: 0,
     shadowOffsetY: 0,
   }
 })
 
-// Icon 配置
+// Icon 配置：根节点始终用绿，成功/失败/执行中按状态色
 const iconConfig = computed(() => {
-  // 使用 Font Awesome 图标，需要转换为文本
-  // 确保使用正确的字体名称
   const iconText = getIconText(props.node.icon)
-  const statusColor = statusColorMap[props.node.status]
+  const statusColor = effectiveStatusColor.value
   const nodeColor = colorMap[props.node.color] || colorMap.gray
+  const isRoot = props.node.type === 'target' || (props.node.id != null && String(props.node.id).startsWith('node-target-'))
+  const useStatusColor = isRoot || (props.node.status !== 'pending' && props.node.status !== undefined)
 
   return {
     x: 0,
     y: 0,
     text: iconText,
     fontSize: 18,
-    fontFamily: '"Font Awesome 6 Free"', // 使用正确的字体名称
-    fontStyle: '900', // Solid 图标需要 900 字重
-    fill: props.node.status !== 'pending' ? statusColor.border : nodeColor.text,
+    fontFamily: '"Font Awesome 6 Free"',
+    fontStyle: '900',
+    fill: useStatusColor ? statusColor.border : nodeColor.text,
     align: 'center',
     verticalAlign: 'middle',
     offsetX: 0,

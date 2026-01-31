@@ -23,6 +23,15 @@
       <span class="text-xs text-gray-500 mt-1 block">{{ formattedTimestamp }}</span>
     </div>
 
+    <!-- 实时执行 action 卡片（执行完保留为历史） -->
+    <div v-else-if="message.type === 'action_execution' && message.actionExecutionData" class="action-execution-message">
+      <ActionExecutionCard
+        :data="message.actionExecutionData"
+        :node-name="executionNodeName"
+      />
+      <span class="text-xs text-gray-500 mt-1 block">{{ formattedTimestamp }}</span>
+    </div>
+
     <!-- 用户消息 -->
     <div v-else-if="message.type === 'user'" class="flex items-start gap-2">
       <i class="fas fa-user text-purple-400 mt-1"></i>
@@ -66,12 +75,22 @@ import { computed } from 'vue'
 import type { DialogMessage } from '@/types'
 import { formatTimestamp } from '@/utils'
 import ActionPlanCard from './ActionPlanCard.vue'
+import ActionExecutionCard from './ActionExecutionCard.vue'
+import { useNodeStore } from '@/stores/node'
 
 interface Props {
   message: DialogMessage
 }
 
 const props = defineProps<Props>()
+const nodeStore = useNodeStore()
+
+const executionNodeName = computed(() => {
+  const tid = props.message.actionExecutionData?.task_id
+  if (tid == null) return undefined
+  const node = nodeStore.getNode(`task-${tid}`)
+  return node?.title
+})
 
 const emit = defineEmits<{
   actionConfirm: [messageId: string, actionPlanId: string]

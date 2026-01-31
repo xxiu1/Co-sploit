@@ -17,7 +17,7 @@ export interface Node {
   metadata?: Record<string, any>
 }
 
-export type NodeStatus = 'pending' | 'executing' | 'success' | 'failed'
+export type NodeStatus = 'pending' | 'executing' | 'in_progress' | 'success' | 'completed' | 'failed'
 
 // ========== 场景相关（从后端获取） ==========
 export interface Scenario {
@@ -92,10 +92,12 @@ export interface SystemState {
 // ========== 对话框消息 ==========
 export interface DialogMessage {
   id: string
-  type: 'system' | 'action' | 'user' | 'success' | 'error' | 'warning'
+  type: 'system' | 'action' | 'user' | 'success' | 'error' | 'warning' | 'action_execution'
   content?: string
   timestamp: string
   actionData?: ActionMessageData
+  /** 实时执行类 action 卡片（来自 action_started/action_ended），执行完保留为历史 */
+  actionExecutionData?: ActionExecutionMessageData
 }
 
 export interface ActionMessageData {
@@ -105,6 +107,28 @@ export interface ActionMessageData {
   result?: ExecutionResult
   nodeDescription?: string
   nodeType?: string
+}
+
+/**
+ * 实时执行的 action 卡片数据：风险得分 + 预计时间 + 风险分析，执行完不消失。
+ * analyze_context 格式：`[RAW]\n<原始日志>\n[LLM]\n<LLM 结果分析>`，前端按此解析展示。
+ */
+export interface ActionExecutionMessageData {
+  action_id: number
+  task_id: number
+  command: string
+  nodeName?: string
+  risk_score?: number
+  risk_brief?: string
+  estimated_time?: string
+  status: 'executing' | 'success' | 'failed'
+  result?: ExecutionResult
+  failureAnalysis?: string
+  suggestions?: string[]
+  started_at?: string
+  finished_at?: string
+  /** 执行输出与 LLM 分析，格式 [RAW]\\n...\\n[LLM]\\n... */
+  analyze_context?: string
 }
 
 // ========== 画布相关 ==========
@@ -151,6 +175,8 @@ export interface Action {
   analyze_context?: string
   risk_score?: number
   timestamp: string
+  /** 从日志解析出的执行时间，优先于 timestamp 展示 */
+  executed_at?: string
 }
 
 // ========== WebSocket 消息 ==========
@@ -168,6 +194,7 @@ export interface WSMessage {
     | 'action_created'
     | 'action_updated'
     | 'action_completed'
+    | 'action_task_bound'
   data: any
   timestamp?: string
 }

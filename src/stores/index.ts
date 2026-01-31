@@ -10,4 +10,5 @@ export { useExecutionStore } from './execution'
 export { useDialogStore } from './dialog'
 export { useCanvasStore } from './canvas'
 export { useActionStore } from './action'
+export { useRiskGateStore } from './riskGate'
 

@@ -13,6 +13,19 @@
 
       <div class="dialog-body">
         <div v-if="node" class="node-detail">
+          <!-- Task Summary: 任务摘要（仅任务节点，来自 task_summary 字段） -->
+          <div v-if="(node.type === 'task' || node.metadata?.task_id != null) && (node.metadata?.task_summary ?? '')" class="info-card card-summary">
+            <div class="card-header">
+              <div class="card-icon summary-icon">
+                <i class="fas fa-align-left"></i>
+              </div>
+              <h3 class="card-title">任务摘要</h3>
+            </div>
+            <div class="card-content">
+              <p class="summary-text">{{ node.metadata?.task_summary ?? '' }}</p>
+            </div>
+          </div>
+
           <!-- Node_Status: 节点状态 - 卡片式布局 -->
           <div class="info-card card-status">
             <div class="card-header">
@@ -63,7 +76,7 @@
             </div>
           </div>
 
-          <!-- History_Actions: 历史操作 - 卡片式布局 -->
+          <!-- History_Actions: 历史操作（含本任务实时） - 卡片式布局 -->
           <div class="info-card card-actions">
             <div class="card-header">
               <div class="card-icon actions-icon">
@@ -73,10 +86,32 @@
               <span v-if="historyActions.length > 0" class="card-badge">{{ historyActions.length }}</span>
             </div>
             <div class="card-content">
+              <!-- 本任务正在执行的操作（实时） -->
+              <div v-if="executingForTask.length > 0" class="executing-for-task-block mb-3">
+                <div class="flex items-center gap-2 mb-2">
+                  <i class="fas fa-spinner fa-spin text-yellow-400 text-xs"></i>
+                  <span class="text-xs font-medium text-yellow-300">本任务正在执行</span>
+                  <span class="text-[10px] bg-yellow-900/50 text-yellow-300 px-1.5 py-0.5 rounded">{{ executingForTask.length }}</span>
+                </div>
+                <div class="space-y-1.5">
+                  <div
+                    v-for="a in executingForTask"
+                    :key="a.action_id"
+                    class="executing-mini-row"
+                  >
+                    <div class="executing-mini-left">
+                      <i class="fas fa-terminal text-yellow-400 text-[10px] mr-1.5"></i>
+                      <code class="text-[11px] text-yellow-200 break-all">{{ a.command }}</code>
+                      <span v-if="a.risk_score != null" class="ml-2 text-[10px] px-1.5 py-0.5 rounded font-semibold" :class="getRiskScoreClass(a.risk_score)">{{ a.risk_score }}</span>
+                    </div>
+                    <span v-if="a.executed_at ?? a.timestamp" class="executing-mini-time text-[10px] text-gray-500 whitespace-nowrap">{{ a.executed_at ?? a.timestamp }}</span>
+                  </div>
+                </div>
+              </div>
               <div v-if="historyActions && historyActions.length > 0" class="actions-timeline-modern">
                 <div 
                   v-for="(action, index) in historyActions" 
-                  :key="action.id || index"
+                  :key="action.action_id ?? action.id ?? index"
                   class="timeline-item-modern"
                 >
                   <div class="timeline-marker-modern" :class="getResultMarkerClass(action.result)">
@@ -89,10 +124,6 @@
                           <i class="fas fa-terminal action-icon"></i>
                           <strong class="action-command-modern">{{ action.command }}</strong>
                         </div>
-                        <span v-if="action.timestamp" class="action-timestamp-modern">
-                          <i class="fas fa-clock"></i>
-                          {{ action.timestamp }}
-                        </span>
                       </div>
                       <div v-if="action.parameters" class="action-params-modern">
                         <span class="params-label">参数:</span>
@@ -108,12 +139,36 @@
                           {{ action.result_detail }}
                         </span>
                       </div>
-                      <div v-if="action.output" class="action-output-modern">
-                        <div class="output-header">
-                          <i class="fas fa-file-code"></i>
-                          <span>输出</span>
+                      <div v-if="(action.output ?? action.analyze_context) || getAnalyzeLlm(action).length" class="action-output-modern">
+                        <div class="output-header flex items-center justify-between gap-2">
+                          <span><i class="fas fa-file-code"></i> {{ getAnalyzeLlm(action) ? '结果分析' : '输出' }}</span>
+                          <button
+                            v-if="getAnalyzeRaw(action).length"
+                            type="button"
+                            class="text-[10px] text-gray-500 hover:text-gray-300"
+                            @click="toggleRawForAction(action.action_id)"
+                          >
+                            {{ expandedRawActionId === action.action_id ? '收起原始日志' : '查看原始日志' }}
+                          </button>
                         </div>
-                        <div class="output-content">{{ action.output }}</div>
+                        <div v-if="getAnalyzeLlm(action)" class="output-content output-llm">{{ getAnalyzeLlm(action) }}</div>
+                        <div v-else class="output-content">{{ action.output ?? action.analyze_context }}</div>
+                        <div v-if="getAnalyzeRaw(action).length && expandedRawActionId === action.action_id" class="output-content output-raw mt-2">{{ getAnalyzeRaw(action) }}</div>
+                      </div>
+                      <div v-if="action.risk_score != null" class="action-risk-modern mt-1">
+                        <span class="text-gray-400 text-[10px]">风险得分</span>
+                        <span
+                          class="ml-1 px-2 py-0.5 rounded text-xs font-semibold"
+                          :class="getRiskScoreClass(action.risk_score)"
+                        >
+                          {{ action.risk_score }}
+                        </span>
+                      </div>
+                      <div v-if="action.executed_at ?? action.timestamp" class="action-card-footer">
+                        <span class="action-timestamp-modern">
+                          <i class="fas fa-clock"></i>
+                          {{ action.executed_at ?? action.timestamp }}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -179,7 +234,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch, ref } from 'vue'
+import { computed, watch, ref, onUnmounted } from 'vue'
+import { useActionStore } from '@/stores'
 import type { Node } from '@/types'
 
 interface Props {
@@ -193,49 +249,101 @@ const emit = defineEmits<{
   'update:modelValue': [value: boolean]
 }>()
 
+const actionStore = useActionStore()
 const visible = computed({
   get: () => props.modelValue,
   set: (value) => emit('update:modelValue', value)
 })
 
 const showContext = ref(false)
+/** 当前展开「查看原始日志」的 action_id */
+const expandedRawActionId = ref<number | null>(null)
 
-const historyActions = computed(() => {
-  const actions = props.node?.metadata?.history_actions || []
-  console.log('[DEBUG] 节点详情 - History_Actions:', {
-    nodeId: props.node?.id,
-    actionsCount: actions.length,
-    actions: actions.slice(0, 2)
-  })
-  return actions
-})
-
-const actionPlans = computed(() => {
-  const plans = props.node?.metadata?.action_plans || []
-  console.log('[DEBUG] 节点详情 - Action_Plans:', {
-    nodeId: props.node?.id,
-    plansCount: plans.length,
-    plans: plans.slice(0, 2)
-  })
-  return plans
-})
-
-// 监听节点变化
-watch(() => props.node, (newNode) => {
-  if (newNode) {
-    console.log('[DEBUG] 节点详情对话框打开:', {
-      id: newNode.id,
-      title: newNode.title,
-      status: newNode.status,
-      metadata: {
-        node_status: newNode.metadata?.node_status,
-        state_context_length: newNode.metadata?.state_context?.length || 0,
-        history_actions_count: newNode.metadata?.history_actions?.length || 0,
-        action_plans_count: newNode.metadata?.action_plans?.length || 0,
-      }
-    })
+/** 从 analyze_context 解析 [RAW] 与 [LLM] 两段，格式： [RAW]\n...\n[LLM]\n... */
+function parseAnalyzeContext(ctx: string | undefined): { raw: string; llm: string } {
+  if (!ctx || !ctx.trim()) return { raw: '', llm: '' }
+  const s = ctx.trim()
+  const llmSep = '\n[LLM]\n'
+  const idx = s.indexOf(llmSep)
+  if (idx >= 0) {
+    const rawPart = s.slice(0, idx)
+    const raw = rawPart.startsWith('[RAW]\n') ? rawPart.slice(6) : rawPart
+    const llm = s.slice(idx + llmSep.length).trim()
+    return { raw, llm }
   }
-}, { immediate: true })
+  if (s.startsWith('[RAW]\n')) return { raw: s.slice(6), llm: '' }
+  return { raw: '', llm: '' }
+}
+
+function getAnalyzeLlm(action: { analyze_context?: string }): string {
+  return parseAnalyzeContext(action.analyze_context).llm
+}
+
+function getAnalyzeRaw(action: { analyze_context?: string }): string {
+  return parseAnalyzeContext(action.analyze_context).raw
+}
+
+function toggleRawForAction(id: number) {
+  expandedRawActionId.value = expandedRawActionId.value === id ? null : id
+}
+
+/** 任务节点 ID（仅任务节点有） */
+const taskId = computed(() => {
+  const id = props.node?.metadata?.task_id
+  return typeof id === 'number' ? id : undefined
+})
+
+/** 来自 metadata 的历史操作（静态） */
+const historyActionsFromMeta = computed(() => props.node?.metadata?.history_actions || [])
+
+/** 展示用历史操作：任务节点优先用 store 实时数据，否则用 metadata */
+const historyActions = computed(() => {
+  const tid = taskId.value
+  if (tid !== undefined) {
+    const fromStore = actionStore.getActionsByTaskId(tid)
+    if (fromStore.length > 0) return fromStore
+  }
+  return historyActionsFromMeta.value
+})
+
+/** 本任务下正在执行的 action（仅任务节点有） */
+const executingForTask = computed(() => {
+  const tid = taskId.value
+  if (tid === undefined) return []
+  return actionStore.getExecutingActionsByTaskId(tid)
+})
+
+const actionPlans = computed(() => props.node?.metadata?.action_plans || [])
+
+// 打开任务节点时拉取该任务的 actions，并做短轮询
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+watch(
+  () => [props.node, props.modelValue] as const,
+  ([newNode, modelValue]) => {
+    if (refreshTimer) {
+      clearInterval(refreshTimer)
+      refreshTimer = null
+    }
+    if (newNode && modelValue && taskId.value !== undefined) {
+      actionStore.fetchActions({ task_id: taskId.value })
+      actionStore.fetchExecutingActions()
+      refreshTimer = setInterval(() => {
+        if (props.modelValue && taskId.value !== undefined) {
+          actionStore.fetchActions({ task_id: taskId.value })
+          actionStore.fetchExecutingActions()
+        }
+      }, 5000)
+    }
+  },
+  { immediate: true }
+)
+
+onUnmounted(() => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
+  }
+})
 
 function handleClose() {
   visible.value = false
@@ -315,6 +423,14 @@ function getResultIcon(result: string): string {
   if (result === 'success') return 'fa-check'
   if (result === 'failed') return 'fa-times'
   return 'fa-question'
+}
+
+/** 风险分 1–10 分制 */
+function getRiskScoreClass(score: number): string {
+  if (score >= 8) return 'bg-red-900/50 text-red-300 border border-red-700'
+  if (score >= 5) return 'bg-orange-900/50 text-orange-300 border border-orange-700'
+  if (score >= 2) return 'bg-yellow-900/50 text-yellow-300 border border-yellow-700'
+  return 'bg-green-900/50 text-green-300 border border-green-700'
 }
 </script>
 
@@ -488,6 +604,10 @@ function getResultIcon(result: string): string {
   color: #3b82f6;
 }
 
+.card-summary::before {
+  color: #06b6d4;
+}
+
 .card-context::before {
   color: #22c55e;
 }
@@ -523,6 +643,20 @@ function getResultIcon(result: string): string {
 .status-icon {
   background: linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(59, 130, 246, 0.1) 100%);
   color: #60a5fa;
+}
+
+.summary-icon {
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.2) 0%, rgba(6, 182, 212, 0.1) 100%);
+  color: #22d3ee;
+}
+
+.summary-text {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: #e5e7eb;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .context-icon {
@@ -692,6 +826,33 @@ function getResultIcon(result: string): string {
   background: rgba(0, 0, 0, 0.3);
 }
 
+/* 本任务正在执行区块 */
+.executing-for-task-block {
+  background: rgba(202, 138, 4, 0.08);
+  border: 1px solid rgba(202, 138, 4, 0.25);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+}
+.executing-mini-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.executing-mini-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  min-width: 0;
+  flex: 1;
+}
+.executing-mini-time {
+  flex-shrink: 0;
+  color: #6b7280;
+}
+
 /* 历史操作时间轴样式 */
 .actions-timeline-modern {
   position: relative;
@@ -809,8 +970,15 @@ function getResultIcon(result: string): string {
   font-weight: 600;
 }
 
-.action-timestamp-modern {
+.action-card-footer {
   display: flex;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(55, 65, 81, 0.5);
+}
+.action-timestamp-modern {
+  display: inline-flex;
   align-items: center;
   gap: 0.375rem;
   color: #9ca3af;
@@ -914,6 +1082,12 @@ function getResultIcon(result: string): string {
   border-radius: 4px;
   max-height: 6rem;
   overflow-y: auto;
+}
+
+.output-content.output-raw {
+  max-height: 12rem;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 /* 操作计划样式 */

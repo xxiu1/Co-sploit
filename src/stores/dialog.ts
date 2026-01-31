@@ -5,7 +5,7 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { DialogMessage, ActionMessageData, ActionPlan } from '@/types'
+import type { DialogMessage, ActionMessageData, ActionExecutionMessageData, ActionPlan } from '@/types'
 import { generateId, formatTimestamp } from '@/utils'
 
 export const useDialogStore = defineStore('dialog', () => {
@@ -71,6 +71,39 @@ export const useDialogStore = defineStore('dialog', () => {
       type: 'action',
       actionData,
     })
+  }
+
+  /**
+   * 添加实时执行 action 卡片（来自 action_started），执行完不删除、作为历史展示
+   */
+  function addActionExecutionMessage(data: Omit<ActionExecutionMessageData, 'status'> & { status?: ActionExecutionMessageData['status'] }) {
+    const existing = messages.value.find(
+      (m) => m.type === 'action_execution' && m.actionExecutionData?.action_id === data.action_id
+    )
+    if (existing && existing.actionExecutionData) {
+      Object.assign(existing.actionExecutionData, { ...data, status: data.status ?? 'executing' })
+      return existing
+    }
+    const payload: ActionExecutionMessageData = {
+      ...data,
+      status: data.status ?? 'executing',
+    }
+    return addMessage({
+      type: 'action_execution',
+      actionExecutionData: payload,
+    })
+  }
+
+  /**
+   * 更新实时执行 action 卡片（来自 action_ended/action_updated）
+   */
+  function updateActionExecutionMessage(action_id: number, updates: Partial<ActionExecutionMessageData>) {
+    const msg = messages.value.find(
+      (m) => m.type === 'action_execution' && m.actionExecutionData?.action_id === action_id
+    )
+    if (msg?.actionExecutionData) {
+      Object.assign(msg.actionExecutionData, updates)
+    }
   }
 
   /**
@@ -215,6 +248,8 @@ export const useDialogStore = defineStore('dialog', () => {
     addMessage,
     addSystemMessage,
     addActionMessage,
+    addActionExecutionMessage,
+    updateActionExecutionMessage,
     addUserMessage,
     addSuccessMessage,
     addErrorMessage,

@@ -37,6 +37,14 @@ export function getSystemState(): Promise<SystemState> {
   return request.get('/flow/state')
 }
 
+/**
+ * 轻量「数据版本」：返回 tasks/actions/clues 计数。
+ * 前端轮询此接口（如每 3s），仅当计数变化时再请求 /nodes、/actions/executing、/clues。
+ */
+export function getStateVersion(): Promise<{ tasks: number; actions: number; clues: number }> {
+  return request.get('/state/version')
+}
+
 // ========== 节点管理 ==========
 
 /**
@@ -141,5 +149,40 @@ export function getExecutingActions(): Promise<{ code: number; message: string; 
  */
 export function getActionById(actionId: number): Promise<{ code: number; message: string; data: Action }> {
   return request.get(`/actions/${actionId}`)
+}
+
+// ========== 风险门控 ==========
+
+export interface RiskGatePendingBrief {
+  action_id: string
+  brief: {
+    action_id?: string
+    command: string
+    risk_score: number
+    risk_breakdown?: {
+      static_risk: number
+      env_weight: number
+      llm_prediction: number
+      confidence: number
+    }
+    risk_attribution?: string
+    benefit_prediction?: string
+    recommendation?: string
+    llm_analysis?: string
+  }
+}
+
+/**
+ * 获取待授权操作的决策简报（返回内层 data，即 RiskGatePendingBrief | null）
+ */
+export function getRiskGatePendingBrief(): Promise<RiskGatePendingBrief | null> {
+  return request.get('/risk-gate/pending-brief')
+}
+
+/**
+ * 授权或拒绝高风险操作（返回内层 data）
+ */
+export function authorizeRiskGateAction(actionId: string, authorized: boolean): Promise<unknown> {
+  return request.post('/risk-gate/authorize', { action_id: actionId, authorized })
 }
 

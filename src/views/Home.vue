@@ -50,6 +50,9 @@
 
     <!-- 底部：终端 -->
     <TerminalPanel ref="terminalRef" />
+
+    <!-- 风险门控：待授权时展示决策简报 -->
+    <DecisionBrief />
   </div>
 </template>
 
@@ -58,6 +61,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { CanvasView } from '@/components/Canvas'
 import { DialogPanel } from '@/components/Dialog'
 import { TerminalPanel } from '@/components/Terminal'
+import { DecisionBrief } from '@/components/RiskGate'
 import StartOverlay from '@/components/Common/StartOverlay.vue'
 import {
   useSystemStore,
@@ -65,10 +69,12 @@ import {
   useClueStore,
   useExecutionStore,
   useDialogStore,
+  useRiskGateStore,
+  useActionStore,
 } from '@/stores'
 import { wsManager } from '@/utils/websocket'
 import { generateNodeFromNextNode, generateConnection, getAttackSurfaceStage } from '@/utils/nodeGenerator'
-import { getActionPlans, executeAction } from '@/api'
+import { getActionPlans, executeAction, getStateVersion } from '@/api'
 import { generateId } from '@/utils'
 import type { Node, Clue, WSMessage, Connection, ExecutionResult, ActionPlan, NextNode, SystemStatus } from '@/types'
 
@@ -77,6 +83,8 @@ const nodeStore = useNodeStore()
 const clueStore = useClueStore()
 const executionStore = useExecutionStore()
 const dialogStore = useDialogStore()
+const riskGateStore = useRiskGateStore()
+const actionStore = useActionStore()
 
 const showStartOverlay = computed(() => systemStore.isIdle)
 const terminalRef = ref<InstanceType<typeof TerminalPanel>>()
@@ -92,6 +100,8 @@ const missionStatusText = computed(() => {
 // 启动流程
 async function handleStartFlow(targetIP: string) {
   try {
+    // 0. 先清空本地“正在执行”列表，避免展示上一轮过期数据（后端在 start 时会清空 task/action 表）
+    actionStore.clearExecutingActions()
     // 1. 添加系统消息
     dialogStore.addSystemMessage('🚀 正在启动自动化渗透测试流程...')
     terminalRef.value?.writeCommand(`Starting automated penetration test for target: ${targetIP}`)
@@ -172,6 +182,8 @@ async function createInitialNode(targetIP: string) {
       title: `TARGET\n${targetIP}`,
       metadata: { ...node.metadata, ip: targetIP },
     })
+    nodeStore.regenerateConnections()
+    nodeStore.calculateTreeLayout()
     return
   }
 
@@ -194,6 +206,8 @@ async function createInitialNode(targetIP: string) {
   }
 
   nodeStore.addNode(initialNode)
+  nodeStore.regenerateConnections()
+  nodeStore.calculateTreeLayout()
   terminalRef.value?.writeOutput(`Initial target node created at (${initialNode.x}, ${initialNode.y})\r\n`)
 }
 
@@ -204,12 +218,22 @@ function initWebSocketListeners() {
     systemStore.updateSystemState(data)
   })
 
-  // 节点更新
+  // 节点更新：收到数组时做合并，保留前端根节点，避免连线消失；单条更新后也重算连线
   wsManager.on('node_update', (data: Node | Node[]) => {
     if (Array.isArray(data)) {
-      nodeStore.setNodes(data)
+      const roots = nodeStore.nodes.filter(
+        (n) => n.type === 'target' || (n.id != null && String(n.id).startsWith('node-target-'))
+      )
+      const backendIds = new Set(data.map((n) => n.id))
+      const merged: Node[] = [...data]
+      for (const r of roots) {
+        if (!backendIds.has(r.id)) merged.push(r)
+      }
+      nodeStore.setNodes(merged)
+      nodeStore.regenerateConnections()
     } else {
       nodeStore.updateNode(data)
+      nodeStore.regenerateConnections()
       // 如果节点状态变化，添加终端日志
       terminalRef.value?.writeOutput(`Node ${data.title} status: ${data.status}\r\n`)
     }
@@ -772,26 +796,37 @@ watch(
 )
 
 
-// 定时轮询节点数据（当系统运行时）
+// 定时轮询：采用「版本轮询」— 只轮询轻量 /api/state/version，仅在计数变化时拉取 nodes/actions/clues
+const POLL_INTERVAL_MS = 3000
 let nodesPollInterval: ReturnType<typeof setInterval> | null = null
+let lastDataVersion: { tasks: number; actions: number; clues: number } | null = null
 
 function startNodesPolling() {
-  // 如果已经有定时器，先清除
   if (nodesPollInterval) {
     clearInterval(nodesPollInterval)
   }
-  
-  // 每 1 秒轮询一次节点数据（提高实时性）
+  lastDataVersion = null
   nodesPollInterval = setInterval(async () => {
-    if (systemStore.isRunning || systemStore.isPaused) {
-      try {
+    if (!systemStore.isRunning && !systemStore.isPaused) return
+    try {
+      const v = await getStateVersion()
+      const next = { tasks: v.tasks, actions: v.actions, clues: v.clues }
+      const changed =
+        lastDataVersion === null ||
+        lastDataVersion.tasks !== next.tasks ||
+        lastDataVersion.actions !== next.actions ||
+        lastDataVersion.clues !== next.clues
+      if (changed) {
+        lastDataVersion = next
         await nodeStore.loadNodes()
         await clueStore.loadClues()
-      } catch (error) {
-        console.error('轮询节点数据失败:', error)
+        await actionStore.fetchExecutingActions()
+        await riskGateStore.fetchPendingBrief()
       }
+    } catch (error) {
+      console.error('轮询数据版本失败:', error)
     }
-  }, 1000) // 1秒轮询一次，提高实时性
+  }, POLL_INTERVAL_MS)
 }
 
 function stopNodesPolling() {
@@ -799,6 +834,7 @@ function stopNodesPolling() {
     clearInterval(nodesPollInterval)
     nodesPollInterval = null
   }
+  lastDataVersion = null
 }
 
 // 监听系统状态变化，自动开始/停止轮询
@@ -807,49 +843,40 @@ let previousStatus: SystemStatus = 'idle'
 let isInitialMount = true
 
 watch(() => systemStore.status, async (newStatus) => {
-  console.log('[DEBUG] 系统状态变化:', { from: previousStatus, to: newStatus, isInitialMount })
-  
-  // 如果是首次挂载，记录初始状态
   if (isInitialMount) {
     previousStatus = newStatus
     isInitialMount = false
-    // 如果初始状态就是 running/paused（可能是页面刷新后的状态恢复），也要启动轮询
     if (newStatus === 'running' || newStatus === 'paused') {
-      console.log('[DEBUG] 检测到系统可能处于运行状态（页面刷新后的状态恢复），启动轮询')
       startNodesPolling()
-      // 立即加载一次节点数据，确保显示最新状态
       try {
         await nodeStore.loadNodes()
         await clueStore.loadClues()
+        await riskGateStore.fetchPendingBrief()
       } catch (error) {
         console.error('初始加载节点数据失败:', error)
       }
     }
     return
   }
-  
-  // 只有在状态变为 running 或 paused 时才开始轮询
-  if ((newStatus === 'running' || newStatus === 'paused') && 
+
+  if ((newStatus === 'running' || newStatus === 'paused') &&
       previousStatus !== 'running' && previousStatus !== 'paused') {
-    console.log('[DEBUG] 开始轮询节点数据')
     startNodesPolling()
+    try {
+      await riskGateStore.fetchPendingBrief()
+    } catch (_) {}
   } else if (newStatus === 'completed') {
-    // 系统完成：停止轮询，但保留节点数据
-    console.log('[DEBUG] 系统完成，停止轮询但保留节点数据')
     stopNodesPolling()
-    // 最后一次加载节点数据，确保数据完整
     try {
       await nodeStore.loadNodes()
       await clueStore.loadClues()
     } catch (error) {
-      console.warn('[DEBUG] 系统完成后加载节点失败（不影响显示）:', error)
+      console.warn('系统完成后加载节点失败:', error)
     }
   } else if (newStatus !== 'running' && newStatus !== 'paused') {
-    // 其他非运行状态，停止轮询
-    console.log('[DEBUG] 停止轮询节点数据')
     stopNodesPolling()
   }
-  
+
   previousStatus = newStatus
 })
 
@@ -860,10 +887,8 @@ onMounted(() => {
   clueStore.initWebSocket()
   executionStore.initWebSocket()
   
-  // 确保轮询已停止（防止从之前的状态恢复）
   stopNodesPolling()
-  console.log('[DEBUG] 组件已挂载，轮询已停止（等待用户启动系统）')
-  
+
   // 初始化 previousStatus
   previousStatus = systemStore.status
 })
