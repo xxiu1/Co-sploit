@@ -99,13 +99,54 @@
       @close="showMenu = false"
       @select="handleItemSelect"
     />
+
+    <!-- 线索列表弹窗 -->
+    <div
+      v-if="showClueListModal"
+      class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+      @click.self="showClueListModal = false"
+    >
+      <div class="bg-dark-panel border border-dark-border rounded-lg w-[500px] max-h-[85vh] overflow-hidden flex flex-col">
+        <div class="p-4 border-b border-dark-border flex items-center justify-between shrink-0">
+          <h3 class="font-bold text-white">
+            <i class="fas fa-database mr-2"></i>线索列表
+          </h3>
+          <button
+            type="button"
+            class="text-gray-400 hover:text-white"
+            @click="showClueListModal = false"
+          >
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+        <div class="flex-1 overflow-y-auto p-4 space-y-3">
+          <div v-if="clueStore.sortedClues.length === 0" class="text-center text-gray-500 py-8 text-sm">
+            暂无线索
+          </div>
+          <div
+            v-for="clue in clueStore.sortedClues"
+            :key="clue.id"
+            class="p-3 rounded-lg bg-gray-900/80 border border-gray-700"
+          >
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-sm font-medium text-white">{{ clue.title }}</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-700 text-gray-300">{{ clue.type }}</span>
+            </div>
+            <div v-if="clueDescription(clue)" class="text-xs text-gray-400 mt-1 whitespace-pre-wrap border-t border-gray-700 pt-2 mt-1">
+              {{ clueDescription(clue) }}
+            </div>
+            <div v-else class="text-[10px] text-gray-500 mt-1 italic">暂无分析</div>
+          </div>
+        </div>
+      </div>
+    </div>
   </aside>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { useDialogStore, useSystemStore, useNodeStore, useExecutionStore, useActionStore } from '@/stores'
-import { executeAction } from '@/api'
+import { useDialogStore, useSystemStore, useNodeStore, useExecutionStore, useActionStore, useClueStore } from '@/stores'
+import { executeAction, replanWithContext } from '@/api'
 import { generateNodeFromNextNode, generateConnection } from '@/utils/nodeGenerator'
 import type { Node, NextNode, Connection } from '@/types'
 import DialogMessage from './DialogMessage.vue'
@@ -116,11 +157,13 @@ const systemStore = useSystemStore()
 const nodeStore = useNodeStore()
 const executionStore = useExecutionStore()
 const actionStore = useActionStore()
+const clueStore = useClueStore()
 
 const messagesContainerRef = ref<HTMLElement>()
 const userInput = ref('')
 const selectedItems = ref<Array<{ id: string; type: string; label: string }>>([])
 const showMenu = ref(false)
+const showClueListModal = ref(false)
 
 const messages = computed(() => dialogStore.messages)
 const panelState = computed(() => {
@@ -156,21 +199,44 @@ function handleScroll() {
   }
 }
 
-function sendUserMessage() {
-  if (!userInput.value.trim()) return
+async function sendUserMessage() {
+  const prompt = userInput.value.trim()
+  if (!prompt && selectedItems.value.length === 0) return
 
-  dialogStore.addUserMessage(userInput.value)
-  userInput.value = ''
-  selectedItems.value = []
+  if ((systemStore.isPaused || systemStore.isCompleted) && (selectedItems.value.length > 0 || prompt)) {
+    const nodeIds = selectedItems.value.filter((i) => i.type === 'node').map((i) => i.id)
+    const clueIds = selectedItems.value.filter((i) => i.type === 'clue').map((i) => i.id)
+    try {
+      const res = await replanWithContext({ prompt: prompt || '', nodeIds, clueIds })
+      if (res?.status) systemStore.updateSystemState(res)
+      dialogStore.addSystemMessage('已提交重新规划请求，系统将根据所选节点与线索重新执行')
+      userInput.value = ''
+      selectedItems.value = []
+    } catch (err: any) {
+      dialogStore.addErrorMessage(err?.message || '重新规划请求失败')
+    }
+    return
+  }
+
+  if (prompt) {
+    dialogStore.addUserMessage(prompt)
+    userInput.value = ''
+    selectedItems.value = []
+  }
 }
 
-function showCluesList() {
-  // 显示线索列表
-  console.log('显示线索列表')
+async function showCluesList() {
+  showClueListModal.value = true
+  try {
+    await clueStore.loadClues()
+  } catch (_) {}
 }
 
-function showSelectionMenu() {
+async function showSelectionMenu() {
   showMenu.value = true
+  try {
+    await clueStore.loadClues()
+  } catch (_) {}
 }
 
 function handleItemSelect(item: { id: string; type: string; label: string }) {
@@ -183,6 +249,11 @@ function removeSelectedItem(id: string) {
   if (index >= 0) {
     selectedItems.value.splice(index, 1)
   }
+}
+
+function clueDescription(clue: { metadata?: Record<string, unknown>; analysis?: string }): string {
+  const desc = clue.metadata?.clue_description ?? clue.analysis
+  return typeof desc === 'string' && desc.trim() ? desc.trim() : ''
 }
 
 // 初始化 Action Store

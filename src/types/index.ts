@@ -186,6 +186,7 @@ export interface WSMessage {
     | 'execution_result'
     | 'system_status'
     | 'clue_added'
+    | 'clue_updated'
     | 'error'
     | 'terminal_output'
     | 'system_command_output'

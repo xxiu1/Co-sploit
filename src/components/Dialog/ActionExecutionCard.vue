@@ -5,7 +5,7 @@
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 text-gray-400 text-xs mb-1">
           <i class="fas fa-map-marker-alt text-purple-400"></i>
-          <span>当前节点: {{ nodeName || `任务 #${data.task_id}` }}</span>
+          <span>当前节点: {{ nodeName || `Task-${data.task_id}` }}</span>
         </div>
         <p v-if="nodeName" class="text-xs text-gray-500 line-clamp-2">{{ nodeName }}</p>
       </div>

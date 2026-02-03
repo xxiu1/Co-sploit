@@ -38,6 +38,17 @@ export function getSystemState(): Promise<SystemState> {
 }
 
 /**
+ * 暂停状态下：用用户 prompt + 所选节点/线索上下文重构提示词，启动重新规划与执行
+ */
+export function replanWithContext(body: {
+  prompt: string
+  nodeIds: string[]
+  clueIds: string[]
+}): Promise<SystemState> {
+  return request.post('/flow/replan', body)
+}
+
+/**
  * 轻量「数据版本」：返回 tasks/actions/clues 计数。
  * 前端轮询此接口（如每 3s），仅当计数变化时再请求 /nodes、/actions/executing、/clues。
  */

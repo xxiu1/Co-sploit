@@ -60,6 +60,9 @@ export const useClueStore = defineStore('clue', () => {
     wsManager.on('clue_added', (data: Clue) => {
       addClue(data)
     })
+    wsManager.on('clue_updated', (data: Clue) => {
+      updateClue({ ...data, createdAt: (data as any).createdAt ?? new Date().toISOString() })
+    })
   }
 
   /**
@@ -82,12 +85,17 @@ export const useClueStore = defineStore('clue', () => {
   }
 
   /**
-   * 更新线索
+   * 更新线索（合并 metadata，保证 clue_description 等 LLM 分析字段不丢失）
    */
   function updateClue(clue: Clue) {
     const index = clues.value.findIndex((c) => c.id === clue.id)
     if (index >= 0) {
-      clues.value[index] = { ...clues.value[index], ...clue }
+      const existing = clues.value[index]
+      const mergedMetadata =
+        existing.metadata && clue.metadata
+          ? { ...existing.metadata, ...clue.metadata }
+          : (clue.metadata ?? existing.metadata ?? {})
+      clues.value[index] = { ...existing, ...clue, metadata: mergedMetadata }
     } else {
       clues.value.push(clue)
     }
