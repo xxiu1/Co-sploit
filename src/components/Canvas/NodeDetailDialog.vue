@@ -13,16 +13,16 @@
 
       <div class="dialog-body">
         <div v-if="node" class="node-detail">
-          <!-- Task Summary: 任务摘要（仅任务节点，来自 task_summary 字段） -->
-          <div v-if="(node.type === 'task' || node.metadata?.task_id != null) && (node.metadata?.task_summary ?? '')" class="info-card card-summary">
+          <!-- 任务描述（仅任务节点，来自 task_description 字段） -->
+          <div v-if="(node.type === 'task' || node.metadata?.task_id != null) && (node.metadata?.task_description ?? '')" class="info-card card-summary">
             <div class="card-header">
               <div class="card-icon summary-icon">
                 <i class="fas fa-align-left"></i>
               </div>
-              <h3 class="card-title">任务摘要</h3>
+              <h3 class="card-title">任务描述</h3>
             </div>
             <div class="card-content">
-              <p class="summary-text">{{ node.metadata?.task_summary ?? '' }}</p>
+              <p class="summary-text">{{ node.metadata?.task_description ?? '' }}</p>
             </div>
           </div>
 
@@ -207,9 +207,9 @@
                     </span>
                     <span class="plan-name-modern">{{ plan.task_name }}</span>
                   </div>
-                  <div v-if="plan.task_summary" class="plan-summary-modern">
+                  <div v-if="plan.task_description" class="plan-summary-modern">
                     <i class="fas fa-info-circle"></i>
-                    {{ plan.task_summary }}
+                    {{ plan.task_description }}
                   </div>
                 </div>
               </div>
