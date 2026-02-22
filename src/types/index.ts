@@ -80,7 +80,7 @@ export interface ExecutionQueueItem {
 }
 
 // ========== 系统状态 ==========
-export type SystemStatus = 'idle' | 'running' | 'paused' | 'completed' | 'error'
+export type SystemStatus = 'idle' | 'running' | 'pausing' | 'paused' | 'completed' | 'error'
 
 export interface SystemState {
   status: SystemStatus

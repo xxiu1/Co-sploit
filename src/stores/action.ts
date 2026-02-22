@@ -172,10 +172,15 @@ export const useActionStore = defineStore('action', () => {
       liveExecuting.value = liveExecuting.value.filter((x) => x.task_id !== data.task_id)
     }
     if (data.action_id != null) {
+      const result = data.status === 'success' ? 'success' : 'failed'
+      updateAction({
+        action_id: data.action_id,
+        result,
+        finished_at: data.finished_at,
+      })
       try {
         const dialogStore = useDialogStore()
         const success = data.status === 'success'
-        // 成功时写固定文案；失败时不写 result.message，留给 action_updated 的 analyze_context（LLM 分析）展示
         dialogStore.updateActionExecutionMessage(data.action_id, {
           status: success ? 'success' : 'failed',
           result: success
@@ -183,7 +188,23 @@ export const useActionStore = defineStore('action', () => {
             : { success: false },
           finished_at: data.finished_at,
         })
-      } catch (_) {}
+      } catch (_) { }
+    } else if (data.task_id != null) {
+      // 后备路径只带 task_id：从「正在执行」中移除该 task 下所有 action，并更新对话框卡片
+      executingActions.value = executingActions.value.filter(
+        (a) => a.parent_node !== data.task_id
+      )
+      try {
+        const dialogStore = useDialogStore()
+        const success = data.status !== 'failed'
+        dialogStore.updateActionExecutionMessagesByTaskId(data.task_id!, {
+          status: success ? 'success' : 'failed',
+          result: success
+            ? { success: true, message: '执行成功' }
+            : { success: false },
+          finished_at: data.finished_at,
+        })
+      } catch (_) { }
     }
   }
 
@@ -222,7 +243,7 @@ export const useActionStore = defineStore('action', () => {
         if (data.risk_score !== undefined && data.risk_score !== null) updates.risk_score = data.risk_score
         if (data.analyze_context !== undefined) updates.analyze_context = data.analyze_context
         useDialogStore().updateActionExecutionMessage(data.action_id, updates)
-      } catch (_) {}
+      } catch (_) { }
     })
     wsManager.on('action_completed', (data: Action) => {
       updateAction(data)

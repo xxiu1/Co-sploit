@@ -205,7 +205,11 @@ const groupConfig = computed(() => ({
 // 根节点或执行成功为绿，失败为红，执行中为动态黄；状态未命中时回退
 const effectiveStatusColor = computed(() => {
   const isRoot = props.node.type === 'target' || (props.node.id != null && String(props.node.id).startsWith('node-target-'))
-  if (isRoot) return statusColorMap.success
+  if (isRoot) {
+    const s = props.node.status
+    if (s === 'executing' || s === 'in_progress') return statusColorMap.executing
+    return statusColorMap.success
+  }
   const s = props.node.status
   const mapped = statusColorMap[s as keyof typeof statusColorMap]
   return mapped ?? (s === 'failed' ? statusColorMap.failed : statusColorMap.pending)

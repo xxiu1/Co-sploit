@@ -19,6 +19,7 @@ export const useSystemStore = defineStore('system', () => {
   // ========== Getters ==========
   const isRunning = computed(() => status.value === 'running')
   const isPaused = computed(() => status.value === 'paused')
+  const isPausing = computed(() => status.value === 'pausing')
   const isCompleted = computed(() => status.value === 'completed')
   const isIdle = computed(() => status.value === 'idle')
   const hasError = computed(() => status.value === 'error' || error.value !== undefined)
@@ -164,6 +165,7 @@ export const useSystemStore = defineStore('system', () => {
     // Getters
     isRunning,
     isPaused,
+    isPausing,
     isCompleted,
     isIdle,
     hasError,

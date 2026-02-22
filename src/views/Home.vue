@@ -16,6 +16,7 @@
             class="ml-1"
             :class="{
               'text-yellow-500': systemStore.isRunning,
+              'text-amber-400': systemStore.isPausing,
               'text-blue-500': systemStore.isPaused,
               'text-green-500': systemStore.isCompleted,
               'text-red-500': systemStore.hasError,
@@ -26,12 +27,13 @@
           </span>
         </div>
         <button
-          v-if="systemStore.isRunning || systemStore.isPaused"
+          v-if="systemStore.isRunning || systemStore.isPausing || systemStore.isPaused"
           @click="handlePauseResume"
-          class="text-xs bg-yellow-900 hover:bg-yellow-800 px-3 py-1.5 rounded text-yellow-300 transition-colors flex items-center gap-1.5"
+          :disabled="systemStore.isPausing"
+          class="text-xs bg-yellow-900 hover:bg-yellow-800 px-3 py-1.5 rounded text-yellow-300 transition-colors flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          <i :class="systemStore.isPaused ? 'fas fa-play' : 'fas fa-pause'"></i>
-          <span>{{ systemStore.isPaused ? '继续' : '暂停' }}</span>
+          <i :class="systemStore.isPaused ? 'fas fa-play' : systemStore.isPausing ? 'fas fa-hourglass-half' : 'fas fa-pause'"></i>
+          <span>{{ systemStore.isPaused ? '继续' : systemStore.isPausing ? '正在暂停' : '暂停' }}</span>
         </button>
       </div>
     </header>
@@ -91,6 +93,7 @@ const terminalRef = ref<InstanceType<typeof TerminalPanel>>()
 
 const missionStatusText = computed(() => {
   if (systemStore.isRunning) return 'IN PROGRESS'
+  if (systemStore.isPausing) return 'PAUSING'
   if (systemStore.isPaused) return 'PAUSED'
   if (systemStore.isCompleted) return 'COMPLETED'
   if (systemStore.hasError) return 'ERROR'
@@ -131,8 +134,12 @@ async function handleStartFlow(targetIP: string) {
       throw error  // 重新抛出错误，让上层处理
     }
 
-    // 5. 创建初始节点（目标设立）
+    // 5. 创建初始节点（目标设立），并设为“正在执行”以便前端在未生成 task 前显示黄色
     await createInitialNode(targetIP)
+    const targetNode = nodeStore.nodes.find((n) => n.type === 'target')
+    if (targetNode) {
+      nodeStore.updateNode({ ...targetNode, status: 'executing' })
+    }
     console.log('[DEBUG] 初始节点已创建:', targetIP)
 
     // 6. 加载初始数据（从数据库获取真实的 tasks 和 clues）
@@ -232,6 +239,17 @@ function initWebSocketListeners() {
       nodeStore.setNodes(merged)
       nodeStore.regenerateConnections()
     } else {
+      const isTaskExecuting =
+        (data.type === 'task' || (data.id != null && String(data.id).startsWith('task-'))) &&
+        (data.status === 'executing' || data.status === 'in_progress')
+      if (isTaskExecuting) {
+        const targets = nodeStore.nodes.filter(
+          (n) => n.type === 'target' || (n.id != null && String(n.id).startsWith('node-target-'))
+        )
+        for (const t of targets) {
+          nodeStore.updateNode({ ...t, status: 'success' })
+        }
+      }
       nodeStore.updateNode(data)
       nodeStore.regenerateConnections()
       // 如果节点状态变化，添加终端日志
@@ -427,8 +445,8 @@ async function handlePauseResume() {
       processExecutionQueue()
     } else {
       await systemStore.pause()
-      dialogStore.addSystemMessage('流程已暂停')
-      terminalRef.value?.writeOutput('Flow paused\r\n')
+      dialogStore.addSystemMessage('正在暂停，等待当前任务完成后将暂停...')
+      terminalRef.value?.writeOutput('Pausing... (waiting for current task to finish)\r\n')
     }
   } catch (error: any) {
     dialogStore.addErrorMessage(`操作失败: ${error.message}`)
@@ -846,7 +864,7 @@ watch(() => systemStore.status, async (newStatus) => {
   if (isInitialMount) {
     previousStatus = newStatus
     isInitialMount = false
-    if (newStatus === 'running' || newStatus === 'paused') {
+    if (newStatus === 'running' || newStatus === 'pausing' || newStatus === 'paused') {
       startNodesPolling()
       try {
         await nodeStore.loadNodes()
@@ -859,8 +877,14 @@ watch(() => systemStore.status, async (newStatus) => {
     return
   }
 
-  if ((newStatus === 'running' || newStatus === 'paused') &&
-      previousStatus !== 'running' && previousStatus !== 'paused') {
+  if (newStatus === 'paused' && previousStatus !== 'paused') {
+    actionStore.clearExecutingActions()
+    dialogStore.addSystemMessage('已暂停')
+    terminalRef.value?.writeOutput('Paused.\r\n')
+  }
+
+  if ((newStatus === 'running' || newStatus === 'pausing' || newStatus === 'paused') &&
+      previousStatus !== 'running' && previousStatus !== 'pausing' && previousStatus !== 'paused') {
     startNodesPolling()
     try {
       await riskGateStore.fetchPendingBrief()
@@ -873,7 +897,7 @@ watch(() => systemStore.status, async (newStatus) => {
     } catch (error) {
       console.warn('系统完成后加载节点失败:', error)
     }
-  } else if (newStatus !== 'running' && newStatus !== 'paused') {
+  } else if (newStatus !== 'running' && newStatus !== 'pausing' && newStatus !== 'paused') {
     stopNodesPolling()
   }
 

@@ -237,10 +237,6 @@ export const useNodeStore = defineStore('node', () => {
 
     // 查找初始节点（target节点）
     const initialNode = nodeList.find(n => n.type === 'target' || n.id.startsWith('node-target-'))
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:generateConnectionsFromNodes', message: '查找初始节点', data: { initialNodeId: initialNode?.id, totalNodes: nodeList.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'I' }) }).catch(() => { });
-    // #endregion
-
     // 记录哪些节点已经有父节点连接
     const nodesWithParent = new Set<string>()
 
@@ -263,13 +259,7 @@ export const useNodeStore = defineStore('node', () => {
             toNodeId: node.id,
           })
           nodesWithParent.add(node.id)
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:generateConnectionsFromNodes', message: '生成连接（有父节点）', data: { from: parentNodeId, to: node.id, parentId }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'A' }) }).catch(() => { });
-          // #endregion
         } else {
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:generateConnectionsFromNodes', message: '父节点不存在', data: { parentNodeId, nodeId: node.id, parentId }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'B' }) }).catch(() => { });
-          // #endregion
         }
       }
 
@@ -297,16 +287,9 @@ export const useNodeStore = defineStore('node', () => {
             toNodeId: node.id,
           })
           nodesWithParent.add(node.id)
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:generateConnectionsFromNodes', message: '连接到初始节点（无父节点）', data: { from: initialNode.id, to: node.id, nodeType: node.type }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'J' }) }).catch(() => { });
-          // #endregion
         }
       }
     }
-
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:generateConnectionsFromNodes', message: '连接生成完成', data: { totalNodes: nodeList.length, connectionsGenerated: conns.length, nodesWithParent: nodesWithParent.size, connections: conns.slice(0, 5).map(c => ({ from: c.fromNodeId, to: c.toNodeId })) }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'C' }) }).catch(() => { });
-    // #endregion
 
     return conns
   }
@@ -314,9 +297,6 @@ export const useNodeStore = defineStore('node', () => {
   async function loadNodes(): Promise<void> {
     try {
       const result = await getNodes()
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:loadNodes', message: '收到后端数据', data: { hasData: !!result, isArray: Array.isArray(result), hasNodes: result && typeof result === 'object' && 'nodes' in result, nodesCount: result && typeof result === 'object' && 'nodes' in result ? (result.nodes || []).length : 0 }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'D' }) }).catch(() => { });
-      // #endregion
 
       console.log('[DEBUG] 收到后端节点数据:', {
         isArray: Array.isArray(result),
@@ -469,9 +449,6 @@ export const useNodeStore = defineStore('node', () => {
 
         // 前后端分离：根据节点的 parent_id 生成连接
         const generatedConnections = generateConnectionsFromNodes(nodes.value)
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:loadNodes', message: '连接生成结果', data: { generatedCount: generatedConnections.length, existingCount: connections.value.length, connections: generatedConnections.slice(0, 3).map(c => ({ from: c.fromNodeId, to: c.toNodeId })) }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'E' }) }).catch(() => { });
-        // #endregion
 
         // 更新连接（完全替换，因为连接是基于节点数据生成的）
         connections.value = generatedConnections
@@ -482,9 +459,6 @@ export const useNodeStore = defineStore('node', () => {
 
         // 同步计算节点位置（树形布局），保证首帧渲染时节点已有 x,y，连线可见
         calculateTreeLayout()
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:loadNodes', message: '布局计算完成', data: { nodesCount: nodes.value.length, connectionsCount: connections.value.length }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'F' }) }).catch(() => { })
-        // #endregion
         console.log('[DEBUG] 布局计算完成，节点数量:', nodes.value.length, '连接数量:', connections.value.length)
       } else {
         console.warn('[DEBUG] 后端返回的数据格式不正确:', result)
@@ -551,15 +525,8 @@ export const useNodeStore = defineStore('node', () => {
       }
       childrenMap.get(conn.fromNodeId)!.push(conn.toNodeId)
       parentMap.set(conn.toNodeId, conn.fromNodeId)
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:calculateTreeLayout', message: '从连接构建关系', data: { from: conn.fromNodeId, to: conn.toNodeId }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'G' }) }).catch(() => { });
-      // #endregion
       console.log('[DEBUG] 从连接构建关系:', conn.fromNodeId, '->', conn.toNodeId)
     }
-
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/3048fdef-7710-456b-8858-d77ccbda2039', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'node.ts:calculateTreeLayout', message: '父子关系构建完成', data: { connectionsCount: connections.value.length, parentMapSize: parentMap.size, childrenMapSize: childrenMap.size, relationships: Array.from(parentMap.entries()).slice(0, 5).map(([child, parent]) => ({ child, parent })) }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'H' }) }).catch(() => { });
-    // #endregion
 
     console.log('[DEBUG] 父子关系构建完成:', {
       父节点数量: parentMap.size,

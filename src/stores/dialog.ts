@@ -107,6 +107,22 @@ export const useDialogStore = defineStore('dialog', () => {
   }
 
   /**
+   * 按 task_id 批量更新实时执行卡片（用于后备路径只带 task_id 的 action_ended）
+   */
+  function updateActionExecutionMessagesByTaskId(
+    taskId: number,
+    updates: Partial<ActionExecutionMessageData>
+  ) {
+    messages.value
+      .filter(
+        (m) => m.type === 'action_execution' && m.actionExecutionData?.task_id === taskId
+      )
+      .forEach((m) => {
+        if (m.actionExecutionData) Object.assign(m.actionExecutionData, updates)
+      })
+  }
+
+  /**
    * 添加用户消息
    */
   function addUserMessage(content: string) {
@@ -250,6 +266,7 @@ export const useDialogStore = defineStore('dialog', () => {
     addActionMessage,
     addActionExecutionMessage,
     updateActionExecutionMessage,
+    updateActionExecutionMessagesByTaskId,
     addUserMessage,
     addSuccessMessage,
     addErrorMessage,
