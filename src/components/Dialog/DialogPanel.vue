@@ -203,7 +203,7 @@ async function sendUserMessage() {
   const prompt = userInput.value.trim()
   if (!prompt && selectedItems.value.length === 0) return
 
-  if ((systemStore.isPaused || systemStore.isCompleted) && (selectedItems.value.length > 0 || prompt)) {
+  if ((systemStore.isPaused || systemStore.isCompleted || systemStore.isFailed) && (selectedItems.value.length > 0 || prompt)) {
     const nodeIds = selectedItems.value.filter((i) => i.type === 'node').map((i) => i.id)
     const clueIds = selectedItems.value.filter((i) => i.type === 'clue').map((i) => i.id)
     try {

@@ -22,7 +22,8 @@ export const useSystemStore = defineStore('system', () => {
   const isPausing = computed(() => status.value === 'pausing')
   const isCompleted = computed(() => status.value === 'completed')
   const isIdle = computed(() => status.value === 'idle')
-  const hasError = computed(() => status.value === 'error' || error.value !== undefined)
+  const isFailed = computed(() => status.value === 'failed')
+  const hasError = computed(() => status.value === 'error' || status.value === 'failed' || error.value !== undefined)
 
   const systemState = computed<SystemState>(() => ({
     status: status.value,
@@ -168,6 +169,7 @@ export const useSystemStore = defineStore('system', () => {
     isPausing,
     isCompleted,
     isIdle,
+    isFailed,
     hasError,
     systemState,
     // Actions

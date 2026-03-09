@@ -6,7 +6,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Clue } from '@/types'
-import { getClues, getClueById, markClue } from '@/api'
+import { getClues, getClueById } from '@/api'
 import { wsManager } from '@/utils/websocket'
 
 export const useClueStore = defineStore('clue', () => {
@@ -130,20 +130,17 @@ export const useClueStore = defineStore('clue', () => {
   }
 
   /**
-   * 标记线索
+   * 标记线索（仅本地状态；后端未实现 mark 持久化时不请求 API，避免 404）
    */
   async function markClueById(clueId: string, marked: boolean): Promise<void> {
-    try {
-      const updatedClue = await markClue(clueId, marked)
-      updateClue(updatedClue)
-      if (marked) {
-        markedClueIds.value.add(clueId)
-      } else {
-        markedClueIds.value.delete(clueId)
-      }
-    } catch (err: any) {
-      console.error('标记线索失败:', err)
-      throw err
+    if (marked) {
+      markedClueIds.value.add(clueId)
+    } else {
+      markedClueIds.value.delete(clueId)
+    }
+    const clue = clues.value.find((c) => c.id === clueId)
+    if (clue) {
+      updateClue({ ...clue, metadata: { ...clue.metadata, marked } })
     }
   }
 

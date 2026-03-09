@@ -43,10 +43,9 @@ export const useActionStore = defineStore('action', () => {
   async function fetchActions(params?: { task_id?: number; status?: string; limit?: number }) {
     try {
       const response = await getActions(params)
-      if (response.code === 200) {
-        actions.value = response.data
-        return response.data
-      }
+      const list = Array.isArray(response) ? response : (response && (response as any).data) ?? []
+      actions.value = Array.isArray(list) ? list : []
+      return actions.value
     } catch (error) {
       console.error('Failed to fetch actions:', error)
     }

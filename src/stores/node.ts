@@ -495,85 +495,60 @@ export const useNodeStore = defineStore('node', () => {
   }
 
   /**
-   * 计算树形布局（从上到下）
+   * Compute tree layout (top-down) with subtree-width awareness to avoid overlapping nodes.
    */
   function calculateTreeLayout() {
     if (nodes.value.length === 0) return
 
-    // 布局参数
-    const baseX = 600  // 画布中心 x
-    const baseY = 150  // 根节点在顶部
-    const spacingX = 250  // 水平间距
-    const spacingY = 180  // 垂直间距
+    const baseX = 600
+    const baseY = 150
+    const spacingX = 280
+    const spacingY = 200
+    const nodeSlotWidth = 220
 
-    // 构建节点映射
     const nodeMap = new Map(nodes.value.map(n => [n.id, n]))
-
-    // 构建父子关系（从 connections 或 metadata.parent_id）
     const childrenMap = new Map<string, string[]>()
     const parentMap = new Map<string, string>()
 
-    console.log('[DEBUG] 开始构建父子关系:', {
-      连接数量: connections.value.length,
-      节点数量: nodes.value.length
-    })
-
-    // 从 connections 构建关系（连接已由前端根据 parent_id 生成）
     for (const conn of connections.value) {
       if (!childrenMap.has(conn.fromNodeId)) {
         childrenMap.set(conn.fromNodeId, [])
       }
       childrenMap.get(conn.fromNodeId)!.push(conn.toNodeId)
       parentMap.set(conn.toNodeId, conn.fromNodeId)
-      console.log('[DEBUG] 从连接构建关系:', conn.fromNodeId, '->', conn.toNodeId)
     }
 
-    console.log('[DEBUG] 父子关系构建完成:', {
-      父节点数量: parentMap.size,
-      有子节点的节点数量: childrenMap.size,
-      父子关系详情: Array.from(parentMap.entries()).slice(0, 5).map(([child, parent]) => ({ child, parent }))
-    })
-
-    // 找到根节点（没有父节点的节点）
-    // 优先使用前端创建的初始节点（target 节点）作为根节点
     const targetNodes = nodes.value.filter(n => n.type === 'target' || n.id.startsWith('node-target-'))
     const rootNodes = targetNodes.length > 0
       ? targetNodes
       : nodes.value.filter(n => !parentMap.has(n.id))
 
-    console.log('[DEBUG] 根节点识别:', {
-      目标节点数量: targetNodes.length,
-      根节点数量: rootNodes.length,
-      根节点IDs: rootNodes.map(n => n.id),
-      所有节点IDs: nodes.value.map(n => n.id),
-      有父节点的节点数量: parentMap.size,
-      有子节点的节点数量: childrenMap.size
-    })
+    const positionedNodes = new Set<string>()
+    const subtreeWidthCache = new Map<string, number>()
 
-    // 如果所有节点都是根节点（没有父子关系），强制水平排列
-    if (rootNodes.length === nodes.value.length && rootNodes.length > 1) {
-      console.log('[DEBUG] 所有节点都是根节点，强制水平排列')
+    function getSubtreeWidth(nodeId: string): number {
+      const cached = subtreeWidthCache.get(nodeId)
+      if (cached !== undefined) return cached
+      const children = childrenMap.get(nodeId) || []
+      if (children.length === 0) {
+        subtreeWidthCache.set(nodeId, nodeSlotWidth)
+        return nodeSlotWidth
+      }
+      const total = children.reduce((sum, cid) => sum + getSubtreeWidth(cid), 0) + (children.length - 1) * spacingX
+      const width = Math.max(nodeSlotWidth, total)
+      subtreeWidthCache.set(nodeId, width)
+      return width
     }
 
-    // 存储已计算位置的节点
-    const positionedNodes = new Set<string>()
-
-    /**
-     * 递归布局节点树
-     */
     function layoutNode(nodeId: string, parentX: number, parentY: number, level: number = 0): void {
       if (positionedNodes.has(nodeId)) return
-
       const node = nodeMap.get(nodeId)
       if (!node) return
 
-      // 获取子节点
       const children = childrenMap.get(nodeId) || []
 
       if (children.length === 0) {
-        // 叶子节点：直接放在父节点下方
         if (level === 0) {
-          // 根节点
           node.x = baseX
           node.y = baseY
         } else {
@@ -581,107 +556,84 @@ export const useNodeStore = defineStore('node', () => {
           node.y = parentY + spacingY
         }
         positionedNodes.add(nodeId)
-      } else {
-        // 有子节点：先布局所有子节点（水平排列），然后将自己放在子节点的中心上方
-        const childPositions: Array<{ x: number; y: number }> = []
-
-        // 计算子节点的总宽度
-        const totalChildWidth = (children.length - 1) * spacingX
-        const childStartX = parentX - totalChildWidth / 2
-
-        // 布局每个子节点（水平排列）
-        for (let i = 0; i < children.length; i++) {
-          const childId = children[i]
-          const childX = childStartX + i * spacingX
-          layoutNode(childId, childX, parentY + spacingY, level + 1)
-          const childNode = nodeMap.get(childId)
-          if (childNode) {
-            childPositions.push({ x: childNode.x, y: childNode.y })
-          }
-        }
-
-        if (childPositions.length > 0) {
-          // 计算子节点的中心 x 坐标
-          const minX = Math.min(...childPositions.map(p => p.x))
-          const maxX = Math.max(...childPositions.map(p => p.x))
-          const centerX = (minX + maxX) / 2
-
-          // 父节点放在子节点中心上方
-          if (level === 0) {
-            node.x = centerX
-            node.y = baseY
-          } else {
-            node.x = centerX
-            node.y = Math.min(...childPositions.map(p => p.y)) - spacingY
-          }
-        } else {
-          // 如果没有子节点位置，使用默认位置
-          node.x = parentX
-          node.y = parentY + spacingY
-        }
-
-        positionedNodes.add(nodeId)
+        return
       }
+
+      const childWidths = children.map((cid) => getSubtreeWidth(cid))
+      const totalWidth = childWidths.reduce((a, b) => a + b, 0) + (children.length - 1) * spacingX
+      let offsetX = parentX - totalWidth / 2
+
+      for (let i = 0; i < children.length; i++) {
+        const childId = children[i]
+        const w = childWidths[i]
+        const childCenterX = offsetX + w / 2
+        layoutNode(childId, childCenterX, parentY + spacingY, level + 1)
+        offsetX += w + spacingX
+      }
+
+      const childNodes = children.map((cid) => nodeMap.get(cid)).filter(Boolean) as typeof nodes.value
+      const minX = Math.min(...childNodes.map((n) => n.x))
+      const maxX = Math.max(...childNodes.map((n) => n.x))
+      const centerX = (minX + maxX) / 2
+
+      if (level === 0) {
+        node.x = centerX
+        node.y = baseY
+      } else {
+        node.x = centerX
+        node.y = Math.min(...childNodes.map((n) => n.y)) - spacingY
+      }
+      positionedNodes.add(nodeId)
     }
 
-    // 布局所有根节点
     if (rootNodes.length === 1) {
-      // 单个根节点
       const rootNode = rootNodes[0]
-      // 如果是前端创建的初始节点，保持其原有位置或使用默认位置
       if (rootNode.type === 'target' || rootNode.id.startsWith('node-target-')) {
         if (rootNode.x === 0 && rootNode.y === 0) {
           rootNode.x = baseX
           rootNode.y = baseY
         }
         positionedNodes.add(rootNode.id)
-        // 布局子节点（水平排列）
         const children = childrenMap.get(rootNode.id) || []
         if (children.length > 0) {
-          const totalChildWidth = (children.length - 1) * spacingX
-          const childStartX = rootNode.x - totalChildWidth / 2
+          const childWidths = children.map((cid) => getSubtreeWidth(cid))
+          const totalWidth = childWidths.reduce((a, b) => a + b, 0) + (children.length - 1) * spacingX
+          let offsetX = rootNode.x - totalWidth / 2
           for (let i = 0; i < children.length; i++) {
             const childId = children[i]
-            const childX = childStartX + i * spacingX
-            layoutNode(childId, childX, rootNode.y, 1)
+            const w = childWidths[i]
+            layoutNode(childId, offsetX + w / 2, rootNode.y + spacingY, 1)
+            offsetX += w + spacingX
           }
         }
       } else {
         layoutNode(rootNode.id, baseX, baseY, 0)
       }
     } else if (rootNodes.length > 1) {
-      // 多个根节点，水平排列（确保不重合）
-      const totalWidth = (rootNodes.length - 1) * spacingX
-      const startX = baseX - totalWidth / 2
-
-      console.log('[DEBUG] 布局多个根节点:', {
-        数量: rootNodes.length,
-        总宽度: totalWidth,
-        起始X: startX,
-        间距: spacingX
-      })
-
+      const rootWidths = rootNodes.map((n) => getSubtreeWidth(n.id))
+      const totalWidth = rootWidths.reduce((a, b) => a + b, 0) + (rootNodes.length - 1) * spacingX
+      let offsetX = baseX - totalWidth / 2
       for (let i = 0; i < rootNodes.length; i++) {
         const rootNode = rootNodes[i]
-        rootNode.x = startX + i * spacingX
+        const w = rootWidths[i]
+        rootNode.x = offsetX + w / 2
         rootNode.y = baseY
         positionedNodes.add(rootNode.id)
-        console.log('[DEBUG] 根节点位置:', rootNode.id, `(${rootNode.x}, ${rootNode.y})`)
-
-        // 布局子节点（水平排列）
         const children = childrenMap.get(rootNode.id) || []
         if (children.length > 0) {
-          const totalChildWidth = (children.length - 1) * spacingX
-          const childStartX = rootNode.x - totalChildWidth / 2
+          const childWidths = children.map((cid) => getSubtreeWidth(cid))
+          const cTotal = childWidths.reduce((a, b) => a + b, 0) + (children.length - 1) * spacingX
+          let cOffset = rootNode.x - cTotal / 2
           for (let j = 0; j < children.length; j++) {
             const childId = children[j]
-            const childX = childStartX + j * spacingX
-            layoutNode(childId, childX, rootNode.y, 1)
+            const cw = childWidths[j]
+            layoutNode(childId, cOffset + cw / 2, rootNode.y + spacingY, 1)
+            cOffset += cw + spacingX
           }
         }
+        offsetX += w + spacingX
       }
     } else {
-      // 没有根节点，按顺序布局（平铺）
       for (let i = 0; i < nodes.value.length; i++) {
         const node = nodes.value[i]
         if (!positionedNodes.has(node.id)) {
@@ -692,34 +644,20 @@ export const useNodeStore = defineStore('node', () => {
       }
     }
 
-    // 确保所有节点都有位置（防止重合）
-    const unpositionedNodes = nodes.value.filter(n => !positionedNodes.has(n.id))
+    const unpositionedNodes = nodes.value.filter((n) => !positionedNodes.has(n.id))
     if (unpositionedNodes.length > 0) {
-      console.log('[DEBUG] 发现未定位的节点，按顺序布局:', unpositionedNodes.length)
-      // 找到已定位节点的最大Y坐标
       const maxY = nodes.value
-        .filter(n => positionedNodes.has(n.id))
+        .filter((n) => positionedNodes.has(n.id))
         .reduce((max, n) => Math.max(max, n.y), baseY)
-
-      // 水平排列未定位的节点
       const totalWidth = (unpositionedNodes.length - 1) * spacingX
       const startX = baseX - totalWidth / 2
-
       for (let i = 0; i < unpositionedNodes.length; i++) {
         const node = unpositionedNodes[i]
         node.x = startX + i * spacingX
         node.y = maxY + spacingY
         positionedNodes.add(node.id)
-        console.log('[DEBUG] 未定位节点位置:', node.id, `(${node.x}, ${node.y})`)
       }
     }
-
-    console.log('[DEBUG] 树形布局计算完成:', {
-      节点数量: nodes.value.length,
-      已定位节点: positionedNodes.size,
-      连接数量: connections.value.length,
-      节点位置示例: nodes.value.slice(0, 3).map(n => ({ id: n.id, x: n.x, y: n.y }))
-    })
   }
 
   return {

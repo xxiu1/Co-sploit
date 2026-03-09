@@ -96,6 +96,7 @@ const missionStatusText = computed(() => {
   if (systemStore.isPausing) return 'PAUSING'
   if (systemStore.isPaused) return 'PAUSED'
   if (systemStore.isCompleted) return 'COMPLETED'
+  if (systemStore.isFailed) return 'MISSION FAILED'
   if (systemStore.hasError) return 'ERROR'
   return 'READY'
 })
@@ -103,8 +104,9 @@ const missionStatusText = computed(() => {
 // 启动流程
 async function handleStartFlow(targetIP: string) {
   try {
-    // 0. 先清空本地“正在执行”列表，避免展示上一轮过期数据（后端在 start 时会清空 task/action 表）
+    // 0. 清空上一轮数据：与后端“每次运行清空 task/action”一致，避免画布残留历史节点
     actionStore.clearExecutingActions()
+    nodeStore.reset()
     // 1. 添加系统消息
     dialogStore.addSystemMessage('🚀 正在启动自动化渗透测试流程...')
     terminalRef.value?.writeCommand(`Starting automated penetration test for target: ${targetIP}`)
@@ -142,8 +144,8 @@ async function handleStartFlow(targetIP: string) {
     }
     console.log('[DEBUG] 初始节点已创建:', targetIP)
 
-    // 6. 加载初始数据（从数据库获取真实的 tasks 和 clues）
-    await loadInitialData()
+    // 6. 加载初始数据（跳过节点：此时后端 Planner 可能已写入一批任务，不拉取以免画布“一开始就一堆节点”；节点由 WebSocket + 轮询逐步更新）
+    await loadInitialData({ skipNodes: true })
 
     // 7. 添加系统消息
     dialogStore.addSystemMessage('🚀 自动化渗透测试流程已启动')
@@ -297,25 +299,21 @@ function initWebSocketListeners() {
   })
 }
 
-// 加载初始数据
-async function loadInitialData() {
+// 加载初始数据（skipNodes: true 时启动瞬间不拉节点，避免画布“一开始就一堆节点”，由 WebSocket + 轮询逐步更新）
+async function loadInitialData(options?: { skipNodes?: boolean }) {
+  const skipNodes = options?.skipNodes === true
   try {
-    // 加载节点
-    await nodeStore.loadNodes()
-
-    // 加载线索
+    if (!skipNodes) {
+      await nodeStore.loadNodes()
+    }
     await clueStore.loadClues()
-
-    // 加载执行历史（如果失败不影响其他功能）
     try {
       await executionStore.loadHistory()
     } catch (error) {
-      // 执行历史加载失败不影响其他功能
       console.warn('加载执行历史失败（不影响其他功能）:', error)
     }
   } catch (error) {
     console.error('加载初始数据失败:', error)
-    // 不再加载演示数据，只记录错误
     terminalRef.value?.writeOutput(`\x1b[33mWarning: Failed to load initial data from backend\x1b[0m\r\n`)
   }
 }
