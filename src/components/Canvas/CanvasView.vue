@@ -326,6 +326,28 @@ function forceRedraw() {
   })
 }
 
+// 视图追踪：正在执行的节点自动居中到视口中央，无需用户手动拖拽
+watch(
+  () => nodeStore.executingNodes,
+  (execNodes) => {
+    if (execNodes.length === 0) return
+    nextTick(() => {
+      const w = containerRef.value?.clientWidth ?? 0
+      const h = containerRef.value?.clientHeight ?? 0
+      if (w === 0 || h === 0) return
+      if (execNodes.length === 1) {
+        canvasStore.centerOn(execNodes[0].x, execNodes[0].y, w, h)
+      } else {
+        const cx = execNodes.reduce((s, n) => s + n.x, 0) / execNodes.length
+        const cy = execNodes.reduce((s, n) => s + n.y, 0) / execNodes.length
+        canvasStore.centerOn(cx, cy, w, h)
+      }
+      updateStagePosition()
+    })
+  },
+  { deep: true }
+)
+
 // 监听画布状态变化
 watch(
   () => [canvasStore.offsetX, canvasStore.offsetY, canvasStore.scale],

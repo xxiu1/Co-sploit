@@ -500,11 +500,12 @@ export const useNodeStore = defineStore('node', () => {
   function calculateTreeLayout() {
     if (nodes.value.length === 0) return
 
-    const baseX = 600
-    const baseY = 150
-    const spacingX = 280
-    const spacingY = 200
-    const nodeSlotWidth = 220
+    // 紧凑布局：缩小间距与原点，避免连线过长、一屏可见更多节点（节点视觉约 100×60，留足余量防重叠）
+    const baseX = 380
+    const baseY = 80
+    const spacingX = 200
+    const spacingY = 130
+    const nodeSlotWidth = 200
 
     const nodeMap = new Map(nodes.value.map(n => [n.id, n]))
     const childrenMap = new Map<string, string[]>()
