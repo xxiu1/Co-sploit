@@ -6,7 +6,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { SystemStatus, SystemState } from '@/types'
-import { getSystemState, startFlow, pauseResumeFlow } from '@/api'
+import { getSystemState, startFlow, pauseResumeFlow, stopFlow } from '@/api'
 import { wsManager } from '@/utils/websocket'
 
 export const useSystemStore = defineStore('system', () => {
@@ -136,6 +136,19 @@ export const useSystemStore = defineStore('system', () => {
   }
 
   /**
+   * 停止流程（终止执行并保存完整输出日志到后端 logs 目录）
+   */
+  async function stop(): Promise<void> {
+    try {
+      const state = await stopFlow()
+      updateSystemState(state)
+    } catch (err: any) {
+      setError(err.message || '停止流程失败')
+      throw err
+    }
+  }
+
+  /**
    * 刷新系统状态
    */
   async function refreshState(): Promise<void> {
@@ -182,6 +195,7 @@ export const useSystemStore = defineStore('system', () => {
     start,
     pause,
     resume,
+    stop,
     refreshState,
     reset,
   }

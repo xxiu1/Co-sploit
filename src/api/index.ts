@@ -31,6 +31,13 @@ export function pauseResumeFlow(data: PauseResumeRequest): Promise<SystemState> 
 }
 
 /**
+ * 停止流程（终止子进程并等待写日志，保存完整输出到 logs 目录）
+ */
+export function stopFlow(): Promise<SystemState> {
+  return request.post('/flow/stop')
+}
+
+/**
  * 获取系统状态
  */
 export function getSystemState(): Promise<SystemState> {

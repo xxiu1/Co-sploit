@@ -10,6 +10,15 @@
       <span class="text-xs font-bold text-gray-400">TERMINAL SESSION 1</span>
       <div class="flex items-center gap-2">
         <button
+          v-if="systemStore.isRunning || systemStore.isPausing || systemStore.isPaused"
+          @click="onStopExecution"
+          class="text-[10px] px-2 py-0.5 rounded bg-red-900 hover:bg-red-800 text-red-300 flex items-center gap-1 transition-colors"
+          title="结束执行并保存输出日志"
+        >
+          <i class="fas fa-stop"></i>
+          <span>结束执行</span>
+        </button>
+        <button
           @click="toggleCollapse"
           class="text-[10px] px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 flex items-center gap-1 transition-colors"
         >
@@ -40,6 +49,14 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { wsManager } from '@/utils/websocket'
+import { useSystemStore } from '@/stores/system'
+
+const systemStore = useSystemStore()
+const emit = defineEmits<{ (e: 'stop'): void }>()
+
+function onStopExecution() {
+  emit('stop')
+}
 
 interface Props {
   autoScroll?: boolean

@@ -35,6 +35,15 @@
           <i :class="systemStore.isPaused ? 'fas fa-play' : systemStore.isPausing ? 'fas fa-hourglass-half' : 'fas fa-pause'"></i>
           <span>{{ systemStore.isPaused ? '继续' : systemStore.isPausing ? '正在暂停' : '暂停' }}</span>
         </button>
+        <button
+          v-if="systemStore.isRunning || systemStore.isPausing || systemStore.isPaused"
+          @click="handleStop"
+          class="text-xs bg-red-900 hover:bg-red-800 px-3 py-1.5 rounded text-red-300 transition-colors flex items-center gap-1.5"
+          title="结束执行并保存输出日志"
+        >
+          <i class="fas fa-stop"></i>
+          <span>结束执行</span>
+        </button>
       </div>
     </header>
 
@@ -51,7 +60,7 @@
     </div>
 
     <!-- 底部：终端 -->
-    <TerminalPanel ref="terminalRef" />
+    <TerminalPanel ref="terminalRef" @stop="handleStop" />
 
     <!-- 风险门控：待授权时展示决策简报 -->
     <DecisionBrief />
@@ -448,6 +457,18 @@ async function handlePauseResume() {
     }
   } catch (error: any) {
     dialogStore.addErrorMessage(`操作失败: ${error.message}`)
+  }
+}
+
+// 停止流程（保存完整输出日志）
+async function handleStop() {
+  try {
+    terminalRef.value?.writeOutput('Stopping and saving log...\r\n')
+    await systemStore.stop()
+    dialogStore.addSystemMessage('流程已停止，输出日志已保存')
+    terminalRef.value?.writeOutput('Flow stopped. Log saved.\r\n')
+  } catch (error: any) {
+    dialogStore.addErrorMessage(`停止失败: ${error.message}`)
   }
 }
 
