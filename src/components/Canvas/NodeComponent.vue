@@ -173,7 +173,7 @@ const pulseCircleConfig3 = computed(() => ({
   listening: false,
 }))
 
-// 颜色映射
+// 颜色映射（cyan 用于重新规划后新增的节点）
 const colorMap = {
   gray: { border: '#6b7280', text: '#9ca3af' },
   blue: { border: '#3b82f6', text: '#60a5fa' },
@@ -182,6 +182,7 @@ const colorMap = {
   red: { border: '#ef4444', text: '#f87171' },
   orange: { border: '#f97316', text: '#fb923c' },
   purple: { border: '#a855f7', text: '#c084fc' },
+  cyan: { border: '#06b6d4', text: '#22d3ee' },
 }
 
 // 状态颜色映射：根节点与成功=绿，失败=红，执行中=动态黄
@@ -215,13 +216,14 @@ const effectiveStatusColor = computed(() => {
   return mapped ?? (s === 'failed' ? statusColorMap.failed : statusColorMap.pending)
 })
 
-// Circle 配置：根节点始终用绿，成功/完成=绿，失败=红，执行中=动态黄，其余用 statusColor（含根/成功/失败映射）
+// Circle 配置：根节点始终用绿，成功/完成=绿，失败=红，执行中=动态黄；重新规划节点用青色；其余用 statusColor
 const circleConfig = computed(() => {
   const statusColor = effectiveStatusColor.value
   const nodeColor = colorMap[props.node.color] || colorMap.gray
   const isExecuting = props.node.status === 'executing' || props.node.status === 'in_progress'
   const isRoot = props.node.type === 'target' || (props.node.id != null && String(props.node.id).startsWith('node-target-'))
-  const useStatusColor = isRoot || (props.node.status !== 'pending' && props.node.status !== undefined)
+  const isReplan = props.node.metadata?.is_replan === true || props.node.color === 'cyan'
+  const useStatusColor = !isReplan && (isRoot || (props.node.status !== 'pending' && props.node.status !== undefined))
 
   return {
     x: 0,
@@ -238,13 +240,14 @@ const circleConfig = computed(() => {
   }
 })
 
-// Icon 配置：根节点始终用绿，成功/失败/执行中按状态色
+// Icon 配置：根节点始终用绿，成功/失败/执行中按状态色；重新规划节点用青色
 const iconConfig = computed(() => {
   const iconText = getIconText(props.node.icon)
   const statusColor = effectiveStatusColor.value
   const nodeColor = colorMap[props.node.color] || colorMap.gray
   const isRoot = props.node.type === 'target' || (props.node.id != null && String(props.node.id).startsWith('node-target-'))
-  const useStatusColor = isRoot || (props.node.status !== 'pending' && props.node.status !== undefined)
+  const isReplan = props.node.metadata?.is_replan === true || props.node.color === 'cyan'
+  const useStatusColor = !isReplan && (isRoot || (props.node.status !== 'pending' && props.node.status !== undefined))
 
   return {
     x: 0,

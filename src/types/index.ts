@@ -9,7 +9,7 @@ export interface Node {
   type: string
   title: string
   icon: string
-  color: 'blue' | 'green' | 'red' | 'orange' | 'purple' | 'yellow' | 'gray'
+  color: 'blue' | 'green' | 'red' | 'orange' | 'purple' | 'yellow' | 'gray' | 'cyan'
   x: number
   y: number
   status: NodeStatus

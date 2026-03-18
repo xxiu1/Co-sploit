@@ -212,6 +212,12 @@ async function sendUserMessage() {
       dialogStore.addSystemMessage('已提交重新规划请求，系统将根据所选节点与线索重新执行')
       userInput.value = ''
       selectedItems.value = []
+      // 立即拉取节点与正在执行的 action，保证右侧与画布马上展示后续内容
+      await Promise.all([
+        nodeStore.loadNodes(),
+        actionStore.fetchExecutingActions(),
+        clueStore.loadClues(),
+      ])
     } catch (err: any) {
       dialogStore.addErrorMessage(err?.message || '重新规划请求失败')
     }
