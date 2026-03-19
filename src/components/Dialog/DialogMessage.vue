@@ -32,6 +32,12 @@
       <span class="text-xs text-gray-500 mt-1 block">{{ formattedTimestamp }}</span>
     </div>
 
+    <!-- Human intervention (Cross-Modal Assistance, etc.) -->
+    <div v-else-if="message.type === 'intervention' && message.interventionData" class="intervention-message">
+      <InterventionCard :data="message.interventionData" />
+      <span class="text-xs text-gray-500 mt-1 block">{{ formattedTimestamp }}</span>
+    </div>
+
     <!-- 用户消息 -->
     <div v-else-if="message.type === 'user'" class="flex items-start gap-2">
       <i class="fas fa-user text-purple-400 mt-1"></i>
@@ -76,6 +82,7 @@ import type { DialogMessage } from '@/types'
 import { formatTimestamp } from '@/utils'
 import ActionPlanCard from './ActionPlanCard.vue'
 import ActionExecutionCard from './ActionExecutionCard.vue'
+import InterventionCard from './InterventionCard.vue'
 import { useNodeStore } from '@/stores/node'
 
 interface Props {
@@ -138,6 +145,10 @@ function handleModify(modifiedCmd: string) {
 
 .message-warning {
   @apply bg-yellow-900/20 border-yellow-700/50;
+}
+
+.message-intervention {
+  @apply bg-cyan-950/30 border-cyan-800/40;
 }
 </style>
 

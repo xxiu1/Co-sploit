@@ -45,6 +45,21 @@ export function getSystemState(): Promise<SystemState> {
 }
 
 /**
+ * Submit human intervention response (Cross-Modal Assistance, etc.)
+ */
+export function submitIntervention(body: {
+  intervention_id: string
+  user_input: string
+}): Promise<{ intervention_id: string; status: string }> {
+  return request.post('/intervention/submit', body)
+}
+
+/** Pending interventions (e.g. after WebSocket reconnect) */
+export function getPendingInterventions(): Promise<{ interventions: Record<string, unknown>[] }> {
+  return request.get('/intervention/pending')
+}
+
+/**
  * 暂停状态下：用用户 prompt + 所选节点/线索上下文重构提示词，启动重新规划与执行
  */
 export function replanWithContext(body: {

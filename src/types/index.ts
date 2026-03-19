@@ -89,15 +89,30 @@ export interface SystemState {
   error?: string
 }
 
+/** Cross-modal / human intervention card (English fields from backend). */
+export interface InterventionMessageData {
+  intervention_id: string
+  intervention_type: string
+  target_node_id: number
+  current_goal: string
+  why_blocked: string
+  required_action: string
+  target_interface_context: string
+  expected_return_format: string
+  status: 'pending' | 'submitted' | 'resolved'
+  user_input?: string
+}
+
 // ========== 对话框消息 ==========
 export interface DialogMessage {
   id: string
-  type: 'system' | 'action' | 'user' | 'success' | 'error' | 'warning' | 'action_execution'
+  type: 'system' | 'action' | 'user' | 'success' | 'error' | 'warning' | 'action_execution' | 'intervention'
   content?: string
   timestamp: string
   actionData?: ActionMessageData
   /** 实时执行类 action 卡片（来自 action_started/action_ended），执行完保留为历史 */
   actionExecutionData?: ActionExecutionMessageData
+  interventionData?: InterventionMessageData
 }
 
 export interface ActionMessageData {
@@ -196,6 +211,8 @@ export interface WSMessage {
     | 'action_updated'
     | 'action_completed'
     | 'action_task_bound'
+    | 'intervention_request'
+    | 'intervention_resolved'
   data: any
   timestamp?: string
 }

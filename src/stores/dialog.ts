@@ -5,7 +5,13 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { DialogMessage, ActionMessageData, ActionExecutionMessageData, ActionPlan } from '@/types'
+import type {
+  DialogMessage,
+  ActionMessageData,
+  ActionExecutionMessageData,
+  ActionPlan,
+  InterventionMessageData,
+} from '@/types'
 import { generateId, formatTimestamp } from '@/utils'
 
 export const useDialogStore = defineStore('dialog', () => {
@@ -163,6 +169,48 @@ export const useDialogStore = defineStore('dialog', () => {
   }
 
   /**
+   * Human intervention card (Cross-Modal, etc.) — payload from WebSocket intervention_request
+   */
+  function addInterventionMessage(payload: Record<string, unknown>) {
+    const iid = String(payload.intervention_id ?? '')
+    if (!iid) return null
+    if (
+      messages.value.some(
+        (m) => m.type === 'intervention' && m.interventionData?.intervention_id === iid
+      )
+    ) {
+      return null
+    }
+    const data: InterventionMessageData = {
+      intervention_id: iid,
+      intervention_type: String(payload.intervention_type ?? ''),
+      target_node_id: Number(payload.target_node_id) || 0,
+      current_goal: String(payload.current_goal ?? ''),
+      why_blocked: String(payload.why_blocked ?? ''),
+      required_action: String(payload.required_action ?? ''),
+      target_interface_context: String(payload.target_interface_context ?? ''),
+      expected_return_format: String(payload.expected_return_format ?? ''),
+      status: (payload.status as InterventionMessageData['status']) || 'pending',
+    }
+    return addMessage({
+      type: 'intervention',
+      interventionData: data,
+    })
+  }
+
+  function setInterventionSubmitted(interventionId: string, userResponse?: string) {
+    const msg = messages.value.find(
+      (m) => m.type === 'intervention' && m.interventionData?.intervention_id === interventionId
+    )
+    if (msg?.interventionData) {
+      msg.interventionData.status = 'submitted'
+      if (userResponse !== undefined) {
+        msg.interventionData.user_input = userResponse
+      }
+    }
+  }
+
+  /**
    * 更新操作消息状态
    */
   function updateActionMessageStatus(messageId: string, status: ActionMessageData['status']) {
@@ -271,6 +319,8 @@ export const useDialogStore = defineStore('dialog', () => {
     addSuccessMessage,
     addErrorMessage,
     addWarningMessage,
+    addInterventionMessage,
+    setInterventionSubmitted,
     updateActionMessageStatus,
     updateActionMessageResult,
     removeMessage,

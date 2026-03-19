@@ -306,6 +306,28 @@ function initWebSocketListeners() {
     systemStore.setError(data.message)
     terminalRef.value?.writeOutput(`\x1b[31mError: ${data.message}\x1b[0m\r\n`)
   })
+
+  // Human intervention (Cross-Modal Assistance — Capability 1)
+  wsManager.on('intervention_request', (data: Record<string, unknown>) => {
+    dialogStore.addInterventionMessage(data)
+    systemStore.updateSystemState({
+      status: 'paused',
+      targetIP: systemStore.targetIP,
+      currentExecutionNode: systemStore.currentExecutionNode,
+    })
+    terminalRef.value?.writeOutput('\r\n[Intervention] Cross-modal assistance required — check CO-PILOT panel.\r\n')
+  })
+
+  wsManager.on('intervention_resolved', (data: { intervention_id?: string; status?: string }) => {
+    if (data?.intervention_id) {
+      dialogStore.setInterventionSubmitted(String(data.intervention_id))
+    }
+    systemStore.updateSystemState({
+      status: 'running',
+      targetIP: systemStore.targetIP,
+      currentExecutionNode: systemStore.currentExecutionNode,
+    })
+  })
 }
 
 // 加载初始数据（skipNodes: true 时启动瞬间不拉节点，避免画布“一开始就一堆节点”，由 WebSocket + 轮询逐步更新）

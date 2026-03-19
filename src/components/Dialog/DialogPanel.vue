@@ -146,7 +146,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useDialogStore, useSystemStore, useNodeStore, useExecutionStore, useActionStore, useClueStore } from '@/stores'
-import { executeAction, replanWithContext } from '@/api'
+import { executeAction, replanWithContext, getPendingInterventions } from '@/api'
 import { generateNodeFromNextNode, generateConnection } from '@/utils/nodeGenerator'
 import type { Node, NextNode, Connection } from '@/types'
 import DialogMessage from './DialogMessage.vue'
@@ -268,10 +268,21 @@ let refreshInterval: ReturnType<typeof setInterval> | null = null
 onMounted(async () => {
   // 初始化 WebSocket 监听
   actionStore.initWebSocketListeners()
-  
+
+  // Restore pending human interventions (e.g. after reconnect)
+  try {
+    const pending = await getPendingInterventions()
+    const list = pending?.interventions ?? []
+    for (const item of list) {
+      dialogStore.addInterventionMessage(item as Record<string, unknown>)
+    }
+  } catch {
+    /* ignore */
+  }
+
   // 获取正在执行的 actions
   await actionStore.fetchExecutingActions()
-  
+
   // 定期刷新正在执行的 actions（每5秒）
   refreshInterval = setInterval(() => {
     actionStore.fetchExecutingActions()
