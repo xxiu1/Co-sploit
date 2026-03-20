@@ -44,6 +44,36 @@
     </dl>
 
     <div v-if="data.status === 'pending'" class="mt-4 space-y-2">
+      <div class="flex items-center justify-between gap-3">
+        <label class="block text-[10px] font-semibold text-gray-500 uppercase">
+          Select clues (optional)
+        </label>
+        <div class="flex items-center gap-2">
+          <span class="text-[10px] text-gray-400">
+            {{ selectedClueIds.length }} selected
+          </span>
+          <button
+            type="button"
+            class="rounded bg-gray-800 hover:bg-gray-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+            :disabled="submitting"
+            @click="showClueSelector = true"
+          >
+            Choose from list
+          </button>
+        </div>
+      </div>
+
+      <div v-if="selectedClueIds.length > 0" class="flex flex-wrap gap-2">
+        <span
+          v-for="clue in selectedClues"
+          :key="clue.id"
+          class="text-[10px] px-2 py-1 rounded bg-cyan-900/40 text-cyan-100 border border-cyan-700/60"
+          title="Clue selected for intervention context"
+        >
+          {{ clue.title }}
+        </span>
+      </div>
+
       <label class="block text-[10px] font-semibold text-gray-500 uppercase">Your response</label>
       <textarea
         v-model="userInput"
@@ -52,10 +82,14 @@
         placeholder="Paste the result in the format described above..."
         :disabled="submitting"
       />
+
       <button
         type="button"
         class="w-full rounded bg-cyan-700 hover:bg-cyan-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
-        :disabled="submitting || !userInput.trim()"
+        :disabled="
+          submitting ||
+          (!userInput.trim() && selectedClueIds.length === 0)
+        "
         @click="onSubmit"
       >
         {{ submitting ? 'Submitting…' : 'Submit' }}
@@ -66,33 +100,151 @@
       Response recorded. The automated run will continue.
     </div>
   </div>
+
+  <div
+    v-if="showClueSelector"
+    class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+    @click.self="showClueSelector = false"
+  >
+    <div class="bg-dark-panel border border-dark-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+      <div class="p-4 border-b border-dark-border flex items-center justify-between shrink-0">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+          <i class="fas fa-database text-purple-400"></i>
+          Select Clues
+        </h3>
+        <button
+          @click="showClueSelector = false"
+          class="p-2 text-gray-400 hover:text-white hover:bg-gray-700/50 rounded-lg transition-colors"
+        >
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-4 min-h-0">
+        <div v-if="clues.length === 0" class="text-center py-12 text-gray-500">
+          <i class="fas fa-database text-4xl opacity-40 mb-3 block"></i>
+          <p class="text-sm">No clues available</p>
+        </div>
+
+        <div v-else class="space-y-3">
+          <div
+            v-for="clue in clues"
+            :key="clue.id"
+            class="p-4 rounded-lg border border-gray-700/80 bg-gray-900/80 hover:bg-gray-800/80 hover:border-purple-600/50 transition-all"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    class="mt-1"
+                    :checked="selectedClueIds.includes(clue.id)"
+                    :disabled="submitting"
+                    @change="toggleClue(clue.id)"
+                  />
+                  <div class="text-sm font-medium text-white truncate">{{ clue.title }}</div>
+                </div>
+                <div class="text-xs text-gray-400 mt-1">{{ clue.type }}</div>
+                <div
+                  v-if="clueDescription(clue)"
+                  class="mt-2 text-xs text-gray-300 leading-relaxed line-clamp-3"
+                >
+                  {{ clueDescription(clue) }}
+                </div>
+              </div>
+              <i class="fas fa-check text-green-400 text-xs mt-1 shrink-0" v-if="selectedClueIds.includes(clue.id)"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="p-4 border-t border-dark-border flex items-center justify-end gap-2 shrink-0">
+        <button
+          type="button"
+          class="rounded bg-gray-800 hover:bg-gray-700 px-4 py-2 text-sm font-semibold text-white"
+          @click="showClueSelector = false"
+          :disabled="submitting"
+        >
+          Done
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { InterventionMessageData } from '@/types'
-import { submitIntervention } from '@/api'
+import type { Clue } from '@/types'
+import { replanWithContext, submitIntervention } from '@/api'
 import { useDialogStore } from '@/stores/dialog'
+import { useClueStore } from '@/stores'
 
 const props = defineProps<{
   data: InterventionMessageData
 }>()
 
 const dialogStore = useDialogStore()
+const clueStore = useClueStore()
 const userInput = ref('')
 const submitting = ref(false)
 const error = ref('')
+const showClueSelector = ref(false)
+const selectedClueIds = ref<string[]>([])
+
+const clues = computed(() => clueStore.sortedClues)
+const selectedClues = computed(() => {
+  const map = clueStore.clueMap
+  return selectedClueIds.value.map((id) => map.get(id)).filter(Boolean) as Clue[]
+})
+
+function clueDescription(clue: Clue): string {
+  const desc = clue.metadata?.clue_description ?? clue.analysis
+  return typeof desc === 'string' && desc.trim() ? desc.trim() : ''
+}
+
+function toggleClue(clueId: string) {
+  const set = new Set(selectedClueIds.value)
+  if (set.has(clueId)) set.delete(clueId)
+  else set.add(clueId)
+  selectedClueIds.value = Array.from(set)
+}
 
 async function onSubmit() {
   error.value = ''
   submitting.value = true
+  showClueSelector.value = false
   try {
-    const trimmed = userInput.value.trim()
+    const trimmedNotes = userInput.value.trim()
+
+    const selectedLines: string[] = []
+    for (const clue of selectedClues.value) {
+      const desc = clueDescription(clue)
+      selectedLines.push(
+        `- ${clue.title} (${clue.id})${desc ? `: ${desc}` : ''}`
+      )
+    }
+
+    const selectionBlock =
+      selectedLines.length > 0 ? `Selected clues:\n${selectedLines.join('\n')}\n\n` : ''
+
+    // Send the combined message so backend + planner can analyze immediately.
+    const finalInput = `${selectionBlock}${trimmedNotes}`.trim()
+
     await submitIntervention({
       intervention_id: props.data.intervention_id,
-      user_input: trimmed,
+      user_input: finalInput,
     })
-    dialogStore.setInterventionSubmitted(props.data.intervention_id, trimmed)
+
+    dialogStore.setInterventionSubmitted(props.data.intervention_id, finalInput)
+
+    // Auto-trigger replan immediately after the user submits intervention context.
+    // This makes the next planner iteration use the clue selection right away.
+    await replanWithContext({
+      prompt: finalInput,
+      nodeIds: [`task-${props.data.target_node_id}`],
+      clueIds: selectedClueIds.value,
+    })
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : 'Submit failed'
   } finally {
