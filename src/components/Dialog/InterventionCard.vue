@@ -181,7 +181,7 @@
 import { computed, ref } from 'vue'
 import type { InterventionMessageData } from '@/types'
 import type { Clue } from '@/types'
-import { replanWithContext, submitIntervention } from '@/api'
+import { submitIntervention } from '@/api'
 import { useDialogStore } from '@/stores/dialog'
 import { useClueStore } from '@/stores'
 
@@ -271,13 +271,10 @@ async function onSubmit() {
 
     dialogStore.setInterventionSubmitted(props.data.intervention_id, finalInput)
 
-    // Auto-trigger replan immediately after the user submits intervention context.
-    // This makes the next planner iteration use the clue selection right away.
-    await replanWithContext({
-      prompt: finalInput,
-      nodeIds: [`task-${props.data.target_node_id}`],
-      clueIds: selectedClueIds.value,
-    })
+    // Do NOT call /api/flow/replan here: replan terminates the HivePentest subprocess
+    // (SIGTERM, exit -15) and restarts a new process. The paused worker already
+    // resumes when submitIntervention writes the response file — same process continues.
+    // Use the toolbar "replan" only when you intentionally want a new subprocess.
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : 'Submit failed'
   } finally {
