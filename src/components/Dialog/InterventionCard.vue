@@ -3,17 +3,22 @@
     class="intervention-card rounded-lg border border-cyan-800/80 bg-cyan-950/40 p-4 text-left"
     data-testid="intervention-card"
   >
-    <div class="flex items-center gap-2 mb-3">
-      <i class="fas fa-hand-paper text-cyan-400"></i>
-      <h3 class="text-sm font-bold text-cyan-200 uppercase tracking-wide">
-        Cross-Modal Assistance
-      </h3>
-      <span
-        v-if="data.status !== 'pending'"
-        class="text-[10px] px-2 py-0.5 rounded bg-green-900/60 text-green-300"
-      >
-        Submitted
-      </span>
+    <div class="flex flex-col gap-1 mb-3">
+      <div class="flex items-center gap-2">
+        <i class="fas fa-hand-paper text-cyan-400"></i>
+        <h3 class="text-sm font-bold text-cyan-200 uppercase tracking-wide">
+          {{ interventionTitle }}
+        </h3>
+        <span
+          v-if="data.status !== 'pending'"
+          class="text-[10px] px-2 py-0.5 rounded bg-green-900/60 text-green-300"
+        >
+          Submitted
+        </span>
+      </div>
+      <p v-if="interventionTypeRaw" class="text-[10px] font-mono text-gray-500 pl-7">
+        {{ interventionTypeRaw }}
+      </p>
     </div>
 
     <dl class="space-y-2 text-xs text-gray-300">
@@ -183,6 +188,34 @@ import { useClueStore } from '@/stores'
 const props = defineProps<{
   data: InterventionMessageData
 }>()
+
+/** Backend `intervention_type` → short English label for the card title. */
+const INTERVENTION_TYPE_LABELS: Record<string, string> = {
+  cross_modal_assistance: 'Cross-Modal Assistance',
+  branch_correction: 'Branch Correction',
+  clue_stagnation: 'Clue Stagnation (local task)',
+  global_path_stagnation: 'Global Path Stagnation',
+}
+
+function titleCaseSnake(s: string): string {
+  return s
+    .split('_')
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ')
+}
+
+const interventionTitle = computed(() => {
+  const raw = (props.data.intervention_type || '').trim().toLowerCase()
+  if (!raw) return 'Human Intervention'
+  return INTERVENTION_TYPE_LABELS[raw] ?? titleCaseSnake(raw)
+})
+
+/** Show machine id under the title for debugging / clarity. */
+const interventionTypeRaw = computed(() => {
+  const t = (props.data.intervention_type || '').trim()
+  return t || null
+})
 
 const dialogStore = useDialogStore()
 const clueStore = useClueStore()
