@@ -21,6 +21,18 @@
       </p>
     </div>
 
+    <div
+      v-if="triggerSummaryLines.length > 0"
+      class="mb-3 rounded border border-amber-800/50 bg-amber-950/30 p-3 text-xs text-amber-100/95"
+    >
+      <div class="font-semibold text-amber-300/90 mb-1.5 uppercase tracking-wide text-[10px]">
+        Trigger summary
+      </div>
+      <ul class="list-disc pl-4 space-y-1 leading-relaxed">
+        <li v-for="(line, idx) in triggerSummaryLines" :key="idx">{{ line }}</li>
+      </ul>
+    </div>
+
     <dl class="space-y-2 text-xs text-gray-300">
       <div>
         <dt class="text-gray-500 font-semibold">Task ID</dt>
@@ -215,6 +227,37 @@ const interventionTitle = computed(() => {
 const interventionTypeRaw = computed(() => {
   const t = (props.data.intervention_type || '').trim()
   return t || null
+})
+
+/** Distinguish clue vs action-failure vs cross-modal for operators (aligned with backend explainer). */
+const triggerSummaryLines = computed(() => {
+  const t = (props.data.intervention_type || '').trim().toLowerCase()
+  const md = (props.data.metadata || {}) as Record<string, unknown>
+  const lines: string[] = []
+  if (t === 'clue_stagnation') {
+    lines.push('State repair — clue stagnation: no new high-value clue from this task in the recent terminal-action window.')
+    if (md.K_stale_actions != null) lines.push(`Stale-action threshold K: ${String(md.K_stale_actions)}`)
+    if (md.current_streak != null || md.clue_stagnation_streak != null) {
+      lines.push(`Current streak: ${String(md.current_streak ?? md.clue_stagnation_streak)}`)
+    }
+  } else if (t === 'global_path_stagnation') {
+    lines.push(
+      'State repair — global path stagnation: HIGH+factual clues not advancing across the last task batches.'
+    )
+    if (md.N_stale_batches != null) lines.push(`Batch threshold N: ${String(md.N_stale_batches)}`)
+    if (md.current_global_streak != null) lines.push(`Global streak: ${String(md.current_global_streak)}`)
+  } else if (t === 'branch_correction') {
+    lines.push(
+      'State repair — branch correction: consecutive terminal failures in one MITRE-style action category (includes non-zero exit and timeouts).'
+    )
+    if (md.action_category != null) lines.push(`Action category: ${String(md.action_category)}`)
+    if (md.failure_streak != null && md.max_consecutive_failures != null) {
+      lines.push(`Consecutive failures: ${String(md.failure_streak)} / threshold ${String(md.max_consecutive_failures)}`)
+    }
+  } else if (t === 'cross_modal_assistance') {
+    lines.push('Cross-modal assistance: human steps required outside the terminal (GUI, vision, multi-app, etc.).')
+  }
+  return lines
 })
 
 const dialogStore = useDialogStore()

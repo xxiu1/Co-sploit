@@ -318,16 +318,73 @@ function initWebSocketListeners() {
     terminalRef.value?.writeOutput('\r\n[Intervention] Cross-modal assistance required — check CO-PILOT panel.\r\n')
   })
 
-  wsManager.on('intervention_resolved', (data: { intervention_id?: string; status?: string }) => {
-    if (data?.intervention_id) {
-      dialogStore.setInterventionSubmitted(String(data.intervention_id))
+  wsManager.on(
+    'intervention_resolved',
+    (data: {
+      intervention_id?: string
+      status?: string
+      trigger_explainer?: { summary_en?: string }
+      hint_en?: string
+    }) => {
+      if (data?.intervention_id) {
+        dialogStore.setInterventionSubmitted(String(data.intervention_id))
+      }
+      if (data?.trigger_explainer?.summary_en) {
+        dialogStore.addSystemMessage(`[Intervention context] ${data.trigger_explainer.summary_en}`)
+      }
+      if (data?.hint_en) {
+        dialogStore.addSystemMessage(data.hint_en)
+      }
+      systemStore.updateSystemState({
+        status: 'running',
+        targetIP: systemStore.targetIP,
+        currentExecutionNode: systemStore.currentExecutionNode,
+      })
     }
-    systemStore.updateSystemState({
-      status: 'running',
-      targetIP: systemStore.targetIP,
-      currentExecutionNode: systemStore.currentExecutionNode,
-    })
-  })
+  )
+
+  wsManager.on(
+    'intervention_applied_to_task_log',
+    (data: {
+      task_id?: number
+      intervention_id?: string
+      intervention_type?: string
+      task_log_appended_chars?: number
+    }) => {
+      const tid = data?.task_id != null ? `task ${data.task_id}` : 'task'
+      const typ = data?.intervention_type ?? '?'
+      dialogStore.addSuccessMessage(
+        `[Intervention] Worker received your feedback — appended to ${tid} task_log (${typ}). Next Planner round can inject it.`
+      )
+      terminalRef.value?.writeOutput(
+        `\r\n\x1b[32m[Intervention]\x1b[0m Applied to task_log: type=${typ} task_id=${data?.task_id ?? '?'}\r\n`
+      )
+    }
+  )
+
+  wsManager.on(
+    'planner_followup_done',
+    (data: {
+      incorporated_user_intervention_from_task_log?: boolean
+      message_en?: string
+      pep_batch_id?: number
+      followup_round?: number
+      retry_attempt?: number | null
+    }) => {
+      const inc = data?.incorporated_user_intervention_from_task_log === true
+      const msg =
+        data?.message_en ||
+        (inc
+          ? 'Planner follow-up included your intervention text in the prompt.'
+          : 'Planner follow-up ran (routine review).')
+      dialogStore.addSystemMessage(`[Planner] ${msg}`)
+      const batch = data?.pep_batch_id != null ? ` batch=${data.pep_batch_id}` : ''
+      const rnd = data?.followup_round != null ? ` round=${data.followup_round}` : ''
+      terminalRef.value?.writeOutput(
+        `\r\n\x1b[36m[Planner follow-up]\x1b[0m${batch}${rnd} intervention_in_prompt=${inc}\r\n`
+      )
+    }
+  )
 }
 
 // 加载初始数据（skipNodes: true 时启动瞬间不拉节点，避免画布“一开始就一堆节点”，由 WebSocket + 轮询逐步更新）

@@ -101,6 +101,19 @@ export interface InterventionMessageData {
   expected_return_format: string
   status: 'pending' | 'submitted' | 'resolved'
   user_input?: string
+  /** Optional: clue_stagnation / branch_correction / global_path_stagnation metrics from backend JSON */
+  metadata?: Record<string, unknown>
+}
+
+/** Structured explanation from POST /api/intervention/submit and intervention_resolved WS */
+export interface InterventionTriggerExplainer {
+  intervention_type: string
+  family: string
+  summary_en: string
+  is_clue_progress_issue?: boolean
+  is_consecutive_action_failure?: boolean
+  action_category?: string | null
+  detail?: Record<string, unknown>
 }
 
 // ========== 对话框消息 ==========
@@ -213,6 +226,8 @@ export interface WSMessage {
     | 'action_task_bound'
     | 'intervention_request'
     | 'intervention_resolved'
+    | 'intervention_applied_to_task_log'
+    | 'planner_followup_done'
   data: any
   timestamp?: string
 }
