@@ -44,6 +44,16 @@ export const useDialogStore = defineStore('dialog', () => {
     return 0
   })
 
+  /** True if any intervention card is still awaiting submit (unified pause→submit→resume path). */
+  const hasPendingIntervention = computed(() =>
+    messages.value.some(
+      (m) =>
+        m.type === 'intervention' &&
+        m.interventionData &&
+        m.interventionData.status !== 'submitted'
+    )
+  )
+
   // ========== Actions ==========
 
   /**
@@ -308,6 +318,7 @@ export const useDialogStore = defineStore('dialog', () => {
     userMessages,
     latestMessage,
     unreadCount,
+    hasPendingIntervention,
     // Actions
     addMessage,
     addSystemMessage,

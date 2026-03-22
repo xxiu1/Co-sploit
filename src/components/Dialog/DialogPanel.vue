@@ -203,6 +203,20 @@ async function sendUserMessage() {
   const prompt = userInput.value.trim()
   if (!prompt && selectedItems.value.length === 0) return
 
+  // Unified intervention lifecycle: pending cards must be submitted via InterventionCard.
+  // Do NOT call /api/flow/replan here — that terminates the subprocess (SIGTERM) and is not part of intervention resolution.
+  if (
+    systemStore.isPaused &&
+    dialogStore.hasPendingIntervention &&
+    (selectedItems.value.length > 0 || prompt)
+  ) {
+    dialogStore.addWarningMessage(
+      'Pending human intervention: submit your response on the intervention card above. ' +
+        'The main flow resumes the same process after submit; the chat “replan” shortcut is disabled until the card is submitted.'
+    )
+    return
+  }
+
   if ((systemStore.isPaused || systemStore.isCompleted || systemStore.isFailed) && (selectedItems.value.length > 0 || prompt)) {
     const nodeIds = selectedItems.value.filter((i) => i.type === 'node').map((i) => i.id)
     const clueIds = selectedItems.value.filter((i) => i.type === 'clue').map((i) => i.id)
