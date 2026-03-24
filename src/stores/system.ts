@@ -15,6 +15,14 @@ export const useSystemStore = defineStore('system', () => {
   const targetIP = ref<string>('')
   const currentExecutionNode = ref<string | undefined>(undefined)
   const error = ref<string | undefined>(undefined)
+  const llmUsage = ref<{
+    context_usage?: number
+    token_total?: number
+    token_input_total?: number
+    token_output_total?: number
+    cost_total?: number | null
+    cost_currency?: string | null
+  }>({})
 
   // ========== Getters ==========
   const isRunning = computed(() => status.value === 'running')
@@ -30,6 +38,7 @@ export const useSystemStore = defineStore('system', () => {
     targetIP: targetIP.value,
     currentExecutionNode: currentExecutionNode.value,
     error: error.value,
+    llm_usage: llmUsage.value,
   }))
 
   // ========== Actions ==========
@@ -58,6 +67,9 @@ export const useSystemStore = defineStore('system', () => {
     }
     if (state.error !== undefined) {
       error.value = state.error
+    }
+    if (state.llm_usage !== undefined) {
+      llmUsage.value = state.llm_usage || {}
     }
   }
 
@@ -168,6 +180,7 @@ export const useSystemStore = defineStore('system', () => {
     targetIP.value = ''
     currentExecutionNode.value = undefined
     error.value = undefined
+    llmUsage.value = {}
   }
 
   return {
@@ -176,6 +189,7 @@ export const useSystemStore = defineStore('system', () => {
     targetIP,
     currentExecutionNode,
     error,
+    llmUsage,
     // Getters
     isRunning,
     isPaused,

@@ -87,6 +87,14 @@ export interface SystemState {
   targetIP?: string
   currentExecutionNode?: string
   error?: string
+  llm_usage?: {
+    context_usage?: number
+    token_total?: number
+    token_input_total?: number
+    token_output_total?: number
+    cost_total?: number | null
+    cost_currency?: string | null
+  }
 }
 
 /** Cross-modal / human intervention card (English fields from backend). */
@@ -228,6 +236,7 @@ export interface WSMessage {
     | 'intervention_resolved'
     | 'intervention_applied_to_task_log'
     | 'planner_followup_done'
+    | 'perceptor_intervention_checkpoint_done'
   data: any
   timestamp?: string
 }

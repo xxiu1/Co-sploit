@@ -26,6 +26,14 @@
             {{ missionStatusText }}
           </span>
         </div>
+        <div class="text-xs text-cyan-300 font-mono">
+          COST:
+          <span class="ml-1 text-cyan-200">{{ llmCostText }}</span>
+        </div>
+        <div class="text-xs text-slate-400 font-mono">
+          TOKENS:
+          <span class="ml-1">{{ llmTokenText }}</span>
+        </div>
         <button
           v-if="systemStore.isRunning || systemStore.isPausing || systemStore.isPaused"
           @click="handlePauseResume"
@@ -108,6 +116,21 @@ const missionStatusText = computed(() => {
   if (systemStore.isFailed) return 'MISSION FAILED'
   if (systemStore.hasError) return 'ERROR'
   return 'READY'
+})
+
+const llmCostText = computed(() => {
+  const usage = systemStore.llmUsage || {}
+  const cost = usage.cost_total
+  if (cost == null || Number.isNaN(Number(cost))) return '-'
+  const currency = usage.cost_currency || 'USD'
+  return `${Number(cost).toFixed(4)} ${currency}`
+})
+
+const llmTokenText = computed(() => {
+  const usage = systemStore.llmUsage || {}
+  const tin = Number(usage.token_input_total || 0)
+  const tout = Number(usage.token_output_total || 0)
+  return `${tin}/${tout}`
 })
 
 // 启动流程
@@ -367,6 +390,12 @@ function initWebSocketListeners() {
     (data: {
       incorporated_user_intervention_from_task_log?: boolean
       message_en?: string
+      intervention_observability?: {
+        intervention_blocks_count?: number
+        intervention_affected_task_ids?: number[]
+        intervention_prompt_evidence_excerpts?: string[]
+      }
+      planner_response_excerpt?: string
       pep_batch_id?: number
       followup_round?: number
       retry_attempt?: number | null
@@ -378,10 +407,47 @@ function initWebSocketListeners() {
           ? 'Planner follow-up included your intervention text in the prompt.'
           : 'Planner follow-up ran (routine review).')
       dialogStore.addSystemMessage(`[Planner] ${msg}`)
+      if (inc) {
+        const ob = data?.intervention_observability
+        const cnt = ob?.intervention_blocks_count ?? 0
+        const tasks = (ob?.intervention_affected_task_ids ?? []).join(', ')
+        if (cnt > 0) {
+          dialogStore.addSystemMessage(
+            `[Planner evidence] Injected ${cnt} intervention block(s)` +
+              (tasks ? ` from task(s): ${tasks}.` : '.')
+          )
+        }
+        const excerpt = (data?.planner_response_excerpt || '').trim()
+        if (excerpt) {
+          dialogStore.addSystemMessage(`[Planner response excerpt] ${excerpt}`)
+        }
+      }
       const batch = data?.pep_batch_id != null ? ` batch=${data.pep_batch_id}` : ''
       const rnd = data?.followup_round != null ? ` round=${data.followup_round}` : ''
       terminalRef.value?.writeOutput(
         `\r\n\x1b[36m[Planner follow-up]\x1b[0m${batch}${rnd} intervention_in_prompt=${inc}\r\n`
+      )
+    }
+  )
+
+  wsManager.on(
+    'perceptor_intervention_checkpoint_done',
+    (data: {
+      pep_batch_id?: number
+      task_id?: number
+      saved_report?: boolean
+      report_count_before?: number
+      report_count_after?: number
+    }) => {
+      const tid = data?.task_id ?? '?'
+      const saved = data?.saved_report === true
+      dialogStore.addSystemMessage(
+        `[Perceptor checkpoint] task=${tid} saved_report=${saved} ` +
+          `(before=${data?.report_count_before ?? '?'} after=${data?.report_count_after ?? '?'})`
+      )
+      const batch = data?.pep_batch_id != null ? ` batch=${data.pep_batch_id}` : ''
+      terminalRef.value?.writeOutput(
+        `\r\n\x1b[35m[Perceptor checkpoint]\x1b[0m${batch} task=${tid} saved=${saved}\r\n`
       )
     }
   )
