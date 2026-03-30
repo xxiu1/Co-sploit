@@ -51,8 +51,8 @@
         <dd class="whitespace-pre-wrap text-yellow-100/90">{{ data.required_action }}</dd>
       </div>
       <div>
-        <dt class="text-gray-500 font-semibold">Where / context</dt>
-        <dd class="whitespace-pre-wrap">{{ data.target_interface_context }}</dd>
+        <dt class="text-gray-500 font-semibold">Run status / 运行状态</dt>
+        <dd class="whitespace-pre-wrap">{{ runStateSummary }}</dd>
       </div>
       <div>
         <dt class="text-gray-500 font-semibold">What to return (format)</dt>
@@ -227,6 +227,14 @@ const interventionTitle = computed(() => {
 const interventionTypeRaw = computed(() => {
   const t = (props.data.intervention_type || '').trim()
   return t || null
+})
+
+/** 服务端注入的当前阶段摘要；旧会话无该字段时回退到 Agent 填写的 interface context */
+const runStateSummary = computed(() => {
+  const s = (props.data.execution_state_summary || '').trim()
+  if (s) return s
+  const fb = (props.data.target_interface_context || '').trim()
+  return fb || '—'
 })
 
 /** Distinguish clue vs action-failure vs cross-modal for operators (aligned with backend explainer). */

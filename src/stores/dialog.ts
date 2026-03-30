@@ -200,6 +200,10 @@ export const useDialogStore = defineStore('dialog', () => {
       why_blocked: String(payload.why_blocked ?? ''),
       required_action: String(payload.required_action ?? ''),
       target_interface_context: String(payload.target_interface_context ?? ''),
+      execution_state_summary:
+        typeof payload.execution_state_summary === 'string'
+          ? payload.execution_state_summary
+          : undefined,
       expected_return_format: String(payload.expected_return_format ?? ''),
       status: (payload.status as InterventionMessageData['status']) || 'pending',
       metadata: md && typeof md === 'object' && !Array.isArray(md) ? { ...(md as Record<string, unknown>) } : undefined,

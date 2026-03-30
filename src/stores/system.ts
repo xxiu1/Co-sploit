@@ -5,7 +5,7 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { SystemStatus, SystemState } from '@/types'
+import type { SystemStatus, SystemState, FeatureFlagsState } from '@/types'
 import { getSystemState, startFlow, pauseResumeFlow, stopFlow } from '@/api'
 import { wsManager } from '@/utils/websocket'
 
@@ -24,6 +24,8 @@ export const useSystemStore = defineStore('system', () => {
     cost_currency?: string | null
   }>({})
 
+  const featureFlags = ref<FeatureFlagsState | undefined>(undefined)
+
   // ========== Getters ==========
   const isRunning = computed(() => status.value === 'running')
   const isPaused = computed(() => status.value === 'paused')
@@ -39,6 +41,7 @@ export const useSystemStore = defineStore('system', () => {
     currentExecutionNode: currentExecutionNode.value,
     error: error.value,
     llm_usage: llmUsage.value,
+    feature_flags: featureFlags.value,
   }))
 
   // ========== Actions ==========
@@ -70,6 +73,9 @@ export const useSystemStore = defineStore('system', () => {
     }
     if (state.llm_usage !== undefined) {
       llmUsage.value = state.llm_usage || {}
+    }
+    if (state.feature_flags !== undefined) {
+      featureFlags.value = state.feature_flags
     }
   }
 
@@ -181,6 +187,7 @@ export const useSystemStore = defineStore('system', () => {
     currentExecutionNode.value = undefined
     error.value = undefined
     llmUsage.value = {}
+    featureFlags.value = undefined
   }
 
   return {
@@ -190,6 +197,7 @@ export const useSystemStore = defineStore('system', () => {
     currentExecutionNode,
     error,
     llmUsage,
+    featureFlags,
     // Getters
     isRunning,
     isPaused,

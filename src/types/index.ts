@@ -82,6 +82,18 @@ export interface ExecutionQueueItem {
 // ========== 系统状态 ==========
 export type SystemStatus = 'idle' | 'running' | 'pausing' | 'paused' | 'completed' | 'failed' | 'error'
 
+export interface FeatureFlagsState {
+  risk_gating: boolean
+  execution_domain: boolean
+  knowledge_stagnation: boolean
+  cross_modal: boolean
+  llm_auxiliary: {
+    risk_brief: boolean
+    action_output_analysis: boolean
+    clue_analysis: boolean
+  }
+}
+
 export interface SystemState {
   status: SystemStatus
   targetIP?: string
@@ -95,6 +107,7 @@ export interface SystemState {
     cost_total?: number | null
     cost_currency?: string | null
   }
+  feature_flags?: FeatureFlagsState
 }
 
 /** Cross-modal / human intervention card (English fields from backend). */
@@ -106,6 +119,8 @@ export interface InterventionMessageData {
   why_blocked: string
   required_action: string
   target_interface_context: string
+  /** 服务端生成的当前运行阶段/任务图摘要；展示时优先于 target_interface_context */
+  execution_state_summary?: string
   expected_return_format: string
   status: 'pending' | 'submitted' | 'resolved'
   user_input?: string
