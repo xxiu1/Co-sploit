@@ -119,8 +119,6 @@ export interface InterventionMessageData {
   why_blocked: string
   required_action: string
   target_interface_context: string
-  /** 服务端生成的当前运行阶段/任务图摘要；展示时优先于 target_interface_context */
-  execution_state_summary?: string
   expected_return_format: string
   status: 'pending' | 'submitted' | 'resolved'
   user_input?: string
