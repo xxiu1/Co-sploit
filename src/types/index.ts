@@ -94,6 +94,23 @@ export interface FeatureFlagsState {
   }
 }
 
+/** Real-time knowledge stagnation patience (from HIVEPENTEST_KNOWLEDGE_PATIENCE). */
+export interface KnowledgePatienceState {
+  knowledge_stagnation_enabled?: boolean
+  streak: number
+  threshold: number
+  M_static: number
+  M_effective: number
+  dynamic_enabled: boolean
+  patience_stage: string
+  patience_stage_inferred: string
+  hysteresis_candidate_stage?: string | null
+  hysteresis_candidate_hits?: number
+  recent_action_class?: string
+  active_non_recon_task_exists?: boolean
+  factual_high_seen?: boolean
+}
+
 export interface SystemState {
   status: SystemStatus
   targetIP?: string
@@ -250,6 +267,7 @@ export interface WSMessage {
     | 'intervention_applied_to_task_log'
     | 'planner_followup_done'
     | 'perceptor_intervention_checkpoint_done'
+    | 'knowledge_patience'
   data: any
   timestamp?: string
 }

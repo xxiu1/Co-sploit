@@ -5,7 +5,7 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { SystemStatus, SystemState, FeatureFlagsState } from '@/types'
+import type { SystemStatus, SystemState, FeatureFlagsState, KnowledgePatienceState } from '@/types'
 import { getSystemState, startFlow, pauseResumeFlow, stopFlow } from '@/api'
 import { wsManager } from '@/utils/websocket'
 
@@ -25,6 +25,8 @@ export const useSystemStore = defineStore('system', () => {
   }>({})
 
   const featureFlags = ref<FeatureFlagsState | undefined>(undefined)
+  /** Session knowledge patience (streak / threshold / stage); updated via WS `knowledge_patience`. */
+  const knowledgePatience = ref<KnowledgePatienceState | null>(null)
 
   // ========== Getters ==========
   const isRunning = computed(() => status.value === 'running')
@@ -52,6 +54,12 @@ export const useSystemStore = defineStore('system', () => {
   function initWebSocket() {
     wsManager.on('system_status', (data: SystemState) => {
       updateSystemState(data)
+    })
+
+    wsManager.on('knowledge_patience', (data: KnowledgePatienceState) => {
+      if (data && typeof data === 'object') {
+        knowledgePatience.value = data as KnowledgePatienceState
+      }
     })
 
     wsManager.on('error', (data: { message: string }) => {
@@ -117,6 +125,7 @@ export const useSystemStore = defineStore('system', () => {
    * 启动流程
    */
   async function start(targetIPValue: string): Promise<void> {
+    knowledgePatience.value = null
     try {
       const state = await startFlow({ targetIP: targetIPValue })
       updateSystemState(state)
@@ -157,6 +166,7 @@ export const useSystemStore = defineStore('system', () => {
    * 停止流程（终止执行并保存完整输出日志到后端 logs 目录）
    */
   async function stop(): Promise<void> {
+    knowledgePatience.value = null
     try {
       const state = await stopFlow()
       updateSystemState(state)
@@ -188,6 +198,7 @@ export const useSystemStore = defineStore('system', () => {
     error.value = undefined
     llmUsage.value = {}
     featureFlags.value = undefined
+    knowledgePatience.value = null
   }
 
   return {
@@ -198,6 +209,7 @@ export const useSystemStore = defineStore('system', () => {
     error,
     llmUsage,
     featureFlags,
+    knowledgePatience,
     // Getters
     isRunning,
     isPaused,

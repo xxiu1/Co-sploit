@@ -34,6 +34,14 @@
           TOKENS:
           <span class="ml-1">{{ llmTokenText }}</span>
         </div>
+        <div
+          v-if="systemStore.knowledgePatience"
+          class="text-xs text-amber-200/90 font-mono max-w-[240px] truncate"
+          :title="knowledgePatienceTooltip"
+        >
+          KNOWLEDGE:
+          <span class="ml-1 text-amber-100">{{ knowledgePatienceLine }}</span>
+        </div>
         <button
           v-if="systemStore.isRunning || systemStore.isPausing || systemStore.isPaused"
           @click="handlePauseResume"
@@ -131,6 +139,36 @@ const llmTokenText = computed(() => {
   const tin = Number(usage.token_input_total || 0)
   const tout = Number(usage.token_output_total || 0)
   return `${tin}/${tout}`
+})
+
+const PATIENCE_STAGE_LABELS: Record<string, string> = {
+  broad_collection: '广收集',
+  focused_branching: '聚焦分支',
+  path_execution: '路径执行',
+  static: '静态',
+}
+
+const knowledgePatienceLine = computed(() => {
+  const k = systemStore.knowledgePatience
+  if (!k) return ''
+  const label = PATIENCE_STAGE_LABELS[k.patience_stage] || k.patience_stage
+  return `${label} ${k.streak}/${k.threshold}`
+})
+
+const knowledgePatienceTooltip = computed(() => {
+  const k = systemStore.knowledgePatience
+  if (!k) return ''
+  const lines = [
+    `稳定阶段: ${k.patience_stage}`,
+    k.dynamic_enabled ? `推断阶段: ${k.patience_stage_inferred}` : '动态耐心: 关闭（静态阈值）',
+    `连续无新高价值线索(终端步): ${k.streak} / 阈值 ${k.threshold}`,
+    `M_static=${k.M_static} · M_effective=${k.M_effective}`,
+    k.recent_action_class != null ? `近期动作类: ${k.recent_action_class}` : '',
+    k.hysteresis_candidate_stage != null && k.hysteresis_candidate_stage !== ''
+      ? `滞回候选: ${k.hysteresis_candidate_stage} (hits=${k.hysteresis_candidate_hits ?? 0})`
+      : '',
+  ]
+  return lines.filter(Boolean).join('\n')
 })
 
 // 启动流程
