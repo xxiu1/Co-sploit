@@ -107,6 +107,26 @@ const selectedNode = computed(() => {
   return nodeStore.getNode(selectedNodeId.value) || null
 })
 
+/** 布局签名：仅坐标/状态/连线变化时触发重绘，避免对 nodes 做 deep watch */
+const nodesLayoutSignature = computed(() =>
+  nodes.value
+    .map((n) => `${n.id}:${Math.round(n.x * 10) / 10}:${Math.round(n.y * 10) / 10}:${n.status}`)
+    .sort()
+    .join('|')
+)
+const connectionsStructureSignature = computed(() =>
+  connections.value
+    .map((c) => `${c.id}:${c.fromNodeId}:${c.toNodeId}`)
+    .sort()
+    .join('|')
+)
+
+/** 仅执行中节点 id 集合变化时自动居中（防抖），避免状态抖动抢视图 */
+const executingIdsKey = computed(() =>
+  [...nodeStore.executingNodes].map((n) => n.id).sort().join(',')
+)
+let centerViewTimer: ReturnType<typeof setTimeout> | null = null
+
 // Stage config
 const stageConfig = computed(() => ({
   width: containerRef.value?.clientWidth || 0,
@@ -122,7 +142,6 @@ const stageConfig = computed(() => ({
 const stageLines = computed(() => {
   const lines: any[] = []
   const width = containerRef.value?.clientWidth || 0
-  const height = containerRef.value?.clientHeight || 0
 
   // 获取所有节点的阶段
   const stages = new Set(nodes.value.map((n) => n.stage).filter((s) => s !== undefined))
@@ -199,7 +218,6 @@ function handleMouseDown(e: MouseEvent) {
 function handleMouseMove(e: MouseEvent) {
   if (isDragging.value) {
     canvasStore.updateDrag(e.clientX, e.clientY)
-    updateStagePosition()
   }
 }
 
@@ -228,7 +246,6 @@ function handleWheel(e: WheelEvent) {
 
   const delta = e.deltaY > 0 ? -0.1 : 0.1
   canvasStore.zoom(delta, x, y)
-  updateStagePosition()
 }
 
 // Stage 事件
@@ -240,25 +257,21 @@ function onStageMouseDown(e: any) {
   }
 }
 
-function onStageMouseMove(e: any) {
-  // 可以在这里添加其他交互逻辑
+function onStageMouseMove(_e: any) {
+  // 预留
 }
 
-function onStageMouseUp(e: any) {
-  // 可以在这里添加其他交互逻辑
+function onStageMouseUp(_e: any) {
+  // 预留
 }
 
 // 节点事件
 function handleNodeClick(node: Node) {
-  console.log('[DEBUG] 节点被点击:', node.id, node.title)
   nodeStore.selectNode(node.id)
-  // 显示节点详情对话框
   showNodeDetail.value = true
-  console.log('[DEBUG] 节点详情对话框应该已打开，selectedNode:', selectedNode.value)
 }
 
 function handleNodeDragEnd(node: Node, e: any) {
-  const stage = e.target.getStage()
   const newX = e.target.x()
   const newY = e.target.y()
   nodeStore.updateNodePosition(node.id, newX, newY)
@@ -275,33 +288,16 @@ function zoomIn() {
   const width = containerRef.value?.clientWidth || 0
   const height = containerRef.value?.clientHeight || 0
   canvasStore.zoomIn(width / 2, height / 2)
-  updateStagePosition()
 }
 
 function zoomOut() {
   const width = containerRef.value?.clientWidth || 0
   const height = containerRef.value?.clientHeight || 0
   canvasStore.zoomOut(width / 2, height / 2)
-  updateStagePosition()
 }
 
 function resetView() {
   canvasStore.reset()
-  updateStagePosition()
-}
-
-function updateStagePosition() {
-  // 更新 stage 位置
-  if (stageRef.value) {
-    const stage = stageRef.value.getStage()
-    if (stage) {
-      stage.x(canvasStore.offsetX)
-      stage.y(canvasStore.offsetY)
-      stage.scaleX(canvasStore.scale)
-      stage.scaleY(canvasStore.scale)
-      stage.draw()
-    }
-  }
 }
 
 // 强制重绘画布
@@ -326,10 +322,15 @@ function forceRedraw() {
   })
 }
 
-// 视图追踪：正在执行的节点自动居中到视口中央，无需用户手动拖拽
-watch(
-  () => nodeStore.executingNodes,
-  (execNodes) => {
+watch(executingIdsKey, (key) => {
+  if (centerViewTimer) {
+    clearTimeout(centerViewTimer)
+    centerViewTimer = null
+  }
+  if (!key) return
+  centerViewTimer = setTimeout(() => {
+    centerViewTimer = null
+    const execNodes = nodeStore.executingNodes
     if (execNodes.length === 0) return
     nextTick(() => {
       const w = containerRef.value?.clientWidth ?? 0
@@ -342,54 +343,25 @@ watch(
         const cy = execNodes.reduce((s, n) => s + n.y, 0) / execNodes.length
         canvasStore.centerOn(cx, cy, w, h)
       }
-      updateStagePosition()
     })
-  },
-  { deep: true }
-)
+  }, 300)
+})
 
-// 监听画布状态变化
-watch(
-  () => [canvasStore.offsetX, canvasStore.offsetY, canvasStore.scale],
-  () => {
-    updateStagePosition()
-  }
-)
-
-// 监听节点变化，更新连线并强制重绘
-watch(
-  () => nodes.value,
-  () => {
-    console.log('[DEBUG] 节点列表已更新，节点数量:', nodes.value.length)
-    forceRedraw()
-  },
-  { deep: true, immediate: false }
-)
-
-// 监听连接变化，更新连线
-watch(
-  () => connections.value,
-  () => {
-    console.log('[DEBUG] 连接列表已更新，连接数量:', connections.value.length)
-    forceRedraw()
-  },
-  { deep: true, immediate: false }
-)
+watch([nodesLayoutSignature, connectionsStructureSignature], () => {
+  forceRedraw()
+})
 
 onMounted(() => {
-  // 初始化画布
-  if (containerRef.value) {
-    const width = containerRef.value.clientWidth
-    const height = containerRef.value.clientHeight
-    // 可以在这里设置初始视图
-  }
-  // 确保初始节点显示
   nextTick(() => {
     forceRedraw()
   })
 })
 
 onUnmounted(() => {
+  if (centerViewTimer) {
+    clearTimeout(centerViewTimer)
+    centerViewTimer = null
+  }
   canvasStore.endDrag()
 })
 </script>

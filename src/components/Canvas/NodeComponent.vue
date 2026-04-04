@@ -1,22 +1,23 @@
 <template>
   <v-group
+    ref="groupRef"
     :config="groupConfig"
     @click="handleClick"
     @dragend="handleDragEnd"
     @contextmenu="handleContextMenu"
   >
-    <!-- 节点状态光环（执行中/进行中）- 动态黄色光圈 -->
+    <!-- 节点状态光环（执行中/进行中）— 由 Konva.Animation 驱动，避免每帧触发 Vue 更新 -->
     <v-circle
       v-if="isExecutingNode"
-      :config="pulseCircleConfig1"
+      :config="pulseRingConfig1"
     />
     <v-circle
       v-if="isExecutingNode"
-      :config="pulseCircleConfig2"
+      :config="pulseRingConfig2"
     />
     <v-circle
       v-if="isExecutingNode"
-      :config="pulseCircleConfig3"
+      :config="pulseRingConfig3"
     />
 
     <!-- 节点主体 -->
@@ -65,11 +66,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import Konva from 'konva'
 import type { Node } from '@/types'
-
-// 注意：vue-konva 3.0 使用方式
-// 组件会自动注册为 v-stage, v-layer, v-circle 等
 
 interface Props {
   node: Node
@@ -86,94 +85,92 @@ const emit = defineEmits<{
   contextmenu: [node: Node, e: MouseEvent]
 }>()
 
-// 动态光圈动画
-const pulseOpacity = ref(0.8)
-const pulseRadius = ref(30)
-let animationFrame: number | null = null
-let isAnimating = false
+const groupRef = ref<{ getNode?: () => Konva.Group } | null>(null)
+let pulseAnimation: Konva.Animation | null = null
 
-function startAnimation() {
-  if (isAnimating) return
-  isAnimating = true
-  animatePulse()
-}
-
-function stopAnimation() {
-  isAnimating = false
-  if (animationFrame !== null) {
-    cancelAnimationFrame(animationFrame)
-    animationFrame = null
-  }
-}
-
-const isExecutingNode = computed(() =>
-  props.node.status === 'executing' || props.node.status === 'in_progress'
+const isExecutingNode = computed(
+  () => props.node.status === 'executing' || props.node.status === 'in_progress'
 )
 
-function animatePulse() {
-  if (!isAnimating || !isExecutingNode.value) {
-    stopAnimation()
-    return
-  }
-  
-  const time = Date.now() * 0.003
-  pulseOpacity.value = 0.3 + Math.sin(time) * 0.3
-  pulseRadius.value = 30 + Math.sin(time * 1.5) * 8
-  
-  animationFrame = requestAnimationFrame(animatePulse)
+/** 静态基底配置；半径/透明度由 Konva.Animation 直接写回 Konva 节点 */
+const pulseRingConfig1 = {
+  x: 0,
+  y: 0,
+  radius: 30,
+  stroke: '#fbbf24',
+  strokeWidth: 2,
+  opacity: 0.6,
+  listening: false,
+  name: 'pulse-ring-1',
+}
+const pulseRingConfig2 = {
+  x: 0,
+  y: 0,
+  radius: 35,
+  stroke: '#fbbf24',
+  strokeWidth: 1.5,
+  opacity: 0.36,
+  listening: false,
+  name: 'pulse-ring-2',
+}
+const pulseRingConfig3 = {
+  x: 0,
+  y: 0,
+  radius: 40,
+  stroke: '#fbbf24',
+  strokeWidth: 1,
+  opacity: 0.18,
+  listening: false,
+  name: 'pulse-ring-3',
 }
 
-onMounted(() => {
-  if (isExecutingNode.value) {
-    startAnimation()
+function stopPulseAnimation() {
+  if (pulseAnimation) {
+    pulseAnimation.stop()
+    pulseAnimation = null
   }
+}
+
+function startPulseAnimation() {
+  stopPulseAnimation()
+  nextTick(() => {
+    const group = groupRef.value?.getNode?.()
+    if (!group) return
+    const layer = group.getLayer()
+    if (!layer) return
+    const c1 = group.findOne<Konva.Circle>('.pulse-ring-1')
+    const c2 = group.findOne<Konva.Circle>('.pulse-ring-2')
+    const c3 = group.findOne<Konva.Circle>('.pulse-ring-3')
+    if (!c1 || !c2 || !c3) return
+
+    pulseAnimation = new Konva.Animation((frame) => {
+      const t = (frame?.time ?? 0) * 0.003
+      const op = 0.3 + Math.sin(t) * 0.3
+      const r = 30 + Math.sin(t * 1.5) * 8
+      c1.radius(r)
+      c1.opacity(op)
+      c2.radius(r + 5)
+      c2.opacity(op * 0.6)
+      c3.radius(r + 10)
+      c3.opacity(op * 0.3)
+    }, layer)
+    pulseAnimation.start()
+  })
+}
+
+watch(isExecutingNode, (executing) => {
+  if (executing) startPulseAnimation()
+  else stopPulseAnimation()
+})
+
+onMounted(() => {
+  if (isExecutingNode.value) startPulseAnimation()
 })
 
 onUnmounted(() => {
-  stopAnimation()
+  stopPulseAnimation()
 })
 
-// 监听节点状态变化
-watch(isExecutingNode, (executing) => {
-  if (executing) {
-    startAnimation()
-  } else {
-    stopAnimation()
-  }
-})
-
-// 动态光圈配置
-const pulseCircleConfig1 = computed(() => ({
-  x: 0,
-  y: 0,
-  radius: pulseRadius.value,
-  stroke: '#fbbf24',
-  strokeWidth: 2,
-  opacity: pulseOpacity.value,
-  listening: false,
-}))
-
-const pulseCircleConfig2 = computed(() => ({
-  x: 0,
-  y: 0,
-  radius: pulseRadius.value + 5,
-  stroke: '#fbbf24',
-  strokeWidth: 1.5,
-  opacity: pulseOpacity.value * 0.6,
-  listening: false,
-}))
-
-const pulseCircleConfig3 = computed(() => ({
-  x: 0,
-  y: 0,
-  radius: pulseRadius.value + 10,
-  stroke: '#fbbf24',
-  strokeWidth: 1,
-  opacity: pulseOpacity.value * 0.3,
-  listening: false,
-}))
-
-// 颜色映射（cyan 用于重新规划后新增的节点）
 const colorMap = {
   gray: { border: '#6b7280', text: '#9ca3af' },
   blue: { border: '#3b82f6', text: '#60a5fa' },
@@ -185,7 +182,6 @@ const colorMap = {
   cyan: { border: '#06b6d4', text: '#22d3ee' },
 }
 
-// 状态颜色映射：根节点与成功=绿，失败=红，执行中=动态黄
 const statusColorMap = {
   pending: { border: '#6b7280', shadow: 'rgba(107, 114, 128, 0.4)' },
   executing: { border: '#fbbf24', shadow: 'rgba(251, 191, 36, 0.8)' },
@@ -195,7 +191,6 @@ const statusColorMap = {
   failed: { border: '#ef4444', shadow: 'rgba(239, 68, 68, 0.7)' },
 }
 
-// Group 配置
 const groupConfig = computed(() => ({
   x: props.node.x,
   y: props.node.y,
@@ -203,9 +198,10 @@ const groupConfig = computed(() => ({
   listening: true,
 }))
 
-// 根节点或执行成功为绿，失败为红，执行中为动态黄；状态未命中时回退
 const effectiveStatusColor = computed(() => {
-  const isRoot = props.node.type === 'target' || (props.node.id != null && String(props.node.id).startsWith('node-target-'))
+  const isRoot =
+    props.node.type === 'target' ||
+    (props.node.id != null && String(props.node.id).startsWith('node-target-'))
   if (isRoot) {
     const s = props.node.status
     if (s === 'executing' || s === 'in_progress') return statusColorMap.executing
@@ -216,14 +212,16 @@ const effectiveStatusColor = computed(() => {
   return mapped ?? (s === 'failed' ? statusColorMap.failed : statusColorMap.pending)
 })
 
-// Circle 配置：根节点始终用绿，成功/完成=绿，失败=红，执行中=动态黄；重新规划节点用青色；其余用 statusColor
 const circleConfig = computed(() => {
   const statusColor = effectiveStatusColor.value
   const nodeColor = colorMap[props.node.color] || colorMap.gray
   const isExecuting = props.node.status === 'executing' || props.node.status === 'in_progress'
-  const isRoot = props.node.type === 'target' || (props.node.id != null && String(props.node.id).startsWith('node-target-'))
+  const isRoot =
+    props.node.type === 'target' ||
+    (props.node.id != null && String(props.node.id).startsWith('node-target-'))
   const isReplan = props.node.metadata?.is_replan === true || props.node.color === 'cyan'
-  const useStatusColor = !isReplan && (isRoot || (props.node.status !== 'pending' && props.node.status !== undefined))
+  const useStatusColor =
+    !isReplan && (isRoot || (props.node.status !== 'pending' && props.node.status !== undefined))
 
   return {
     x: 0,
@@ -240,14 +238,16 @@ const circleConfig = computed(() => {
   }
 })
 
-// Icon 配置：根节点始终用绿，成功/失败/执行中按状态色；重新规划节点用青色
 const iconConfig = computed(() => {
   const iconText = getIconText(props.node.icon)
   const statusColor = effectiveStatusColor.value
   const nodeColor = colorMap[props.node.color] || colorMap.gray
-  const isRoot = props.node.type === 'target' || (props.node.id != null && String(props.node.id).startsWith('node-target-'))
+  const isRoot =
+    props.node.type === 'target' ||
+    (props.node.id != null && String(props.node.id).startsWith('node-target-'))
   const isReplan = props.node.metadata?.is_replan === true || props.node.color === 'cyan'
-  const useStatusColor = !isReplan && (isRoot || (props.node.status !== 'pending' && props.node.status !== undefined))
+  const useStatusColor =
+    !isReplan && (isRoot || (props.node.status !== 'pending' && props.node.status !== undefined))
 
   return {
     x: 0,
@@ -264,7 +264,6 @@ const iconConfig = computed(() => {
   }
 })
 
-// Title 配置
 const titleConfig = computed(() => ({
   x: 0,
   y: 35,
@@ -280,31 +279,26 @@ const titleConfig = computed(() => ({
   wrap: 'word',
 }))
 
-// 获取图标文本（Font Awesome 6 Free Unicode）
 function getIconText(icon: string): string {
-  // Font Awesome 6 Free 图标类名转换为 Unicode
-  // 使用 Font Awesome 6 的 Unicode 值
   const iconMap: Record<string, string> = {
-    'fa-server': '\uf233', // server
-    'fa-tasks': '\uf0ae', // tasks (list-check)
-    'fa-laptop-code': '\uf5fc', // laptop-code
-    'fa-network-wired': '\uf6ff', // network-wired
-    'fa-shield-alt': '\uf3ed', // shield-alt (shield-halved)
-    'fa-user-secret': '\uf21b', // user-secret
-    'fa-key': '\uf084', // key
-    'fa-database': '\uf1c0', // database
-    'fa-file-code': '\uf1c9', // file-code
-    'fa-terminal': '\uf120', // terminal
-    'fa-bug': '\uf188', // bug
-    'fa-search': '\uf002', // search
+    'fa-server': '\uf233',
+    'fa-tasks': '\uf0ae',
+    'fa-laptop-code': '\uf5fc',
+    'fa-network-wired': '\uf6ff',
+    'fa-shield-alt': '\uf3ed',
+    'fa-user-secret': '\uf21b',
+    'fa-key': '\uf084',
+    'fa-database': '\uf1c0',
+    'fa-file-code': '\uf1c9',
+    'fa-terminal': '\uf120',
+    'fa-bug': '\uf188',
+    'fa-search': '\uf002',
   }
-  return iconMap[icon] || '\uf0ae' // 默认使用 tasks 图标
+  return iconMap[icon] || '\uf0ae'
 }
 
-// 事件处理
 function handleClick(e: any) {
-  console.log('[DEBUG] NodeComponent 节点被点击:', props.node.id, props.node.title, e)
-  e.cancelBubble = true // 阻止事件冒泡
+  e.cancelBubble = true
   emit('click', props.node)
 }
 
@@ -316,4 +310,3 @@ function handleContextMenu(e: MouseEvent) {
   emit('contextmenu', props.node, e)
 }
 </script>
-
